@@ -87,8 +87,10 @@ class Struct(dict):
 def _repr_field(struct_code, value):
     if struct_code in "bBhHiIlLqQnN":
         l = struct.calcsize("<" + struct_code)
-        # l bytes -> 2*l nibbles, plus 2 for the "0x"
-        f = "{:#0" + str(2 + 2 * l) + "x}"
+        # l bytes -> 2*l nibbles, and we write the 0x explicitly instead of
+        # using the '#' format because '#' counts against the width
+        # specification and that's confusing.
+        f = "0x{:0" + str(2 * l) + "x}"
         return f.format(value)
     else:
         return repr(value)
