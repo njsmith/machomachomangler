@@ -352,8 +352,9 @@ def redll(buf, mapping):
             name_offset = rva_to_file_offset(pe_headers.sections, s[name_field])
             name = get_asciiz(new_buf, name_offset)
             if name in rva_mapping:
+                # print("RVA: %s -> %s"
+                #       % (hex(s[name_field]), hex(rva_mapping[name])))
                 s[name_field] = rva_mapping[name]
-                print("New RVA:", hex(rva_mapping[name]))
                 unused_names.discard(name)
 
     rewrite_names(view_import_directory_tables, "Name RVA")
