@@ -124,15 +124,21 @@ Debian with a mingw-w64 cross-compiler and wine installed::
   dll_function says: test_dll
 
 
+Contact
+-------
+
+wheel-builders@python.org
+
+
 License
 -------
 
-It's Saturday afternoon, I've got the flu, and I'm spending my free
-time writing software to make a proprietary operating system -- one
-that is backed by one of the world's larger corporations -- better
-able to compete for developers with other, better-designed operating
-systems. Because I guess Microsoft can't afford to pay for such
-things, and is dependent on charity. I mean, I'm not saying that
+It's Saturday afternoon, I've got the flu or something, and I'm
+spending my free time writing software to make a proprietary operating
+system -- one that is backed by one of the world's larger corporations
+-- better able to compete for developers with other, better-designed
+operating systems. Because I guess Microsoft can't afford to pay for
+such things, and is dependent on charity. I mean, I'm not saying that
 poring over the PE/COFF specification isn't fun! But it's not *that*
 fun.
 
@@ -145,7 +151,8 @@ This **shouldn't have any effect** on most uses, since it only affects
 people who are redistributing this software or running it on behalf
 of other people; you can *use* this software to manipulate your
 BSD-licensed DLLs, your proprietary-licensed DLLs, or whatever you
-like, and that's fine.
+like, and that's fine. The license affects the code for redll itself;
+not the code you run it on.
 
 However, if for some reason you or your company have some kind of
 allergy to this license, send me `an email
