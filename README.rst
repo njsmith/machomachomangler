@@ -55,14 +55,16 @@ implied" stuff is extra true. Some particular known limitations:
   anything. (The issue is that ``binutils`` wants all the data
   involved in the import tables to come from a single PE section.)
   However, I've tried giving the patched files to Dependency Walker,
-  ``wine``, and Windows itself, and they all handle them fine. Just be
-  warned that if you're trying to use ``objdump`` to check if the
-  patching worked, then it's almost certainly lying to you.
+  ``wine``, and Windows itself, and they all handle them fine -- so
+  the files are okay, it's just a bug in ``objdump``. Just be warned
+  that if you're trying to use ``objdump`` to check if the patching
+  worked, then it's almost certainly going to tell you a confusing
+  lie.
 
 - Unsurprisingly, this kind of patching does not play well with code
   signing. We try to at least clear any existing signatures (so that
   the binary becomes unsigned, rather than signed with an invalid
-  signature), but this hasn't been tested at all.
+  signature), but this hasn't been tested.
 
 - We don't try to handle files with trailing data after the end of the
   PE file proper. This commonly occurs with e.g. self-extracting
@@ -74,8 +76,8 @@ implied" stuff is extra true. Some particular known limitations:
 
 - We don't try to update the PE header checksum, since the algorithm
   for doing this is a secret, and I'm informed that for regular
-  user-space code there's nothing that checks it anyway. But my
-  information could be wrong.
+  user-space code there's nothing that actually cares about whether
+  it's correct. But my information could be wrong.
 
 - There's no test suite, so this whole thing will dissolve into a
   million tiny spikey shards of brokenness as soon as my back is
@@ -113,7 +115,7 @@ Debian with a mingw-w64 cross-compiler and wine installed::
 
   # Apparently wine's way of signalling a missing DLL is to fail silently.
   $ wine test.exe || echo "failed -- test_dll.dll is missing"
-  failed
+  failed -- test_dll.dll is missing
 
   $ PYTHONPATH=.. python3 -m redll test.exe test-patched.exe test_dll.dll test_dll_renamed.dll
 
@@ -125,17 +127,17 @@ Debian with a mingw-w64 cross-compiler and wine installed::
 License
 -------
 
-It's Saturday afternoon, I've got the flu, and I'm spending my
-free time writing software to make a proprietary operating system
--- one that is backed by one of the world's larger corporations --
-better able to compete for developers with other, better-designed
-operating systems. Because Microsoft can't afford to pay for such
+It's Saturday afternoon, I've got the flu, and I'm spending my free
+time writing software to make a proprietary operating system -- one
+that is backed by one of the world's larger corporations -- better
+able to compete for developers with other, better-designed operating
+systems. Because I guess Microsoft can't afford to pay for such
 things, and is dependent on charity. I mean, I'm not saying that
-poring over the PE/COFF specification isn't fun! But it's not
-*that* fun.
+poring over the PE/COFF specification isn't fun! But it's not *that*
+fun.
 
 To assuage my annoyance, this software is licensed under the *GNU
-**Affero** General Public License as published by the Free Software
+Affero General Public License as published by the Free Software
 Foundation, either version 3 of the License or (at your option)
 any later version*. See ``LICENSE.txt`` for details.
 
