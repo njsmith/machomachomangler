@@ -326,6 +326,8 @@ def redll(buf, mapping):
     section_offset_mapping = {}
     data_writer = BytesIO()
     for old_dll, new_dll in mapping.items():
+        # section_offset_mapping contains lowercased DLL names
+        old_dll = old_dll.decode("ascii").lower().encode("ascii")
         data_offset = data_writer.tell()
         data_writer.write(new_dll)
         data_writer.write(b"\x00")
@@ -351,6 +353,8 @@ def redll(buf, mapping):
         for s in viewer(pe_headers):
             name_offset = rva_to_file_offset(pe_headers.sections, s[name_field])
             name = get_asciiz(new_buf, name_offset)
+            # lowercase name for case-insensitive matching
+            name = name.decode("ascii").lower().encode("ascii")
             if name in rva_mapping:
                 # print("RVA: %s -> %s"
                 #       % (hex(s[name_field]), hex(rva_mapping[name])))
