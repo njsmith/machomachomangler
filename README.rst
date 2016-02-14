@@ -81,6 +81,46 @@ implied" stuff is extra true. Some particular known limitations:
   million tiny spikey shards of brokenness as soon as my back is
   turned.
 
+- Only tested on **Python 3.4**. Probably any Python 3 will work, and
+  Python 2 definitely won't without some fixes. (There's lots of
+  fiddly byte-string handling.)
+
+- Currently missing standard niceties like ``setup.py``, docs,
+  copyright headers, etc.
+
+
+Example
+-------
+
+::
+
+  $ python3 -m redll A.dll A-patched.dll libgfortran-3.dll libgfortan-3-for-A.dll
+
+There's an example in ``example/`` then you can play with. E.g. on
+Debian with a mingw-w64 cross-compiler and wine installed::
+
+  $ cd example/
+
+  $ ./build.sh
+  + i686-w64-mingw32-gcc -shared test_dll.c -o test_dll.dll
+  + i686-w64-mingw32-gcc test.c -o test.exe -L. -ltest_dll
+  + i686-w64-mingw32-strip test.exe
+
+  $ wine test.exe
+  dll_function says: test_dll
+
+  $ mv test_dll.dll test_dll_renamed.dll
+
+  # Apparently wine's way of signalling a missing DLL is to fail silently.
+  $ wine test.exe || echo "failed -- test_dll.dll is missing"
+  failed
+
+  $ PYTHONPATH=.. python3 -m redll test.exe test-patched.exe test_dll.dll test_dll_renamed.dll
+
+  # Now it works again:
+  $ wine test-patched.exe
+  dll_function says: test_dll
+
 
 License
 -------
