@@ -46,7 +46,7 @@ doesn't require reading the awful SxS assembly documentation.
 Notes / caveats
 ---------------
 
-Currently this is a one-day hack. So the usual "no warranty express of
+Currently this is a one-day hack. So the usual "no warranty express or
 implied" stuff is extra true. Some particular known limitations:
 
 - GNU ``objdump`` has a bug where it can't read the import tables of
