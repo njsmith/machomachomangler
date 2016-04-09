@@ -74,10 +74,17 @@ implied" stuff is extra true. Some particular known limitations:
   though in theory this should work fine -- so probably there's some
   improvements possible.
 
+  (It looks like this is a GNU extension for putting long section
+  names into PE files, which I guess are useful for their debugging --
+  this is documented at:
+  https://sourceware.org/binutils/docs/bfd/coff.html)
+
 - We don't try to update the PE header checksum, since the algorithm
   for doing this is a secret, and I'm informed that for regular
   user-space code there's nothing that actually cares about whether
-  it's correct. But my information could be wrong.
+  it's correct. But my information could be wrong. (Note: it looks
+  like binutils might know how to compute this checksum? I'm not
+  sure.)
 
 - There's no test suite, so this whole thing will dissolve into a
   million tiny spikey shards of brokenness as soon as my back is
@@ -86,6 +93,12 @@ implied" stuff is extra true. Some particular known limitations:
 - Only tested on **Python 3.4**. Probably any Python 3 will work, and
   Python 2 definitely won't without some fixes. (There's lots of
   fiddly byte-string handling.)
+
+- I'm lazy, so I just load the whole ``.exe`` or ``.dll`` file into
+  memory -- maybe several copies of it. This actually wouldn't be too
+  hard to fix (using memory mapping etc.) but I guess it doesn't
+  matter that much because `who has multi-gigabyte PE images?
+  <http://tvtropes.org/pmwiki/pmwiki.php/Main/WhatCouldPossiblyGoWrong>`_?
 
 - Currently missing standard niceties like ``setup.py``, docs,
   copyright headers, etc.
