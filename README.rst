@@ -80,11 +80,17 @@ implied" stuff is extra true. Some particular known limitations:
   https://sourceware.org/binutils/docs/bfd/coff.html)
 
 - We don't try to update the PE header checksum, since the algorithm
-  for doing this is a secret, and I'm informed that for regular
-  user-space code there's nothing that actually cares about whether
-  it's correct. But my information could be wrong. (Note: it looks
-  like binutils might know how to compute this checksum? I'm not
+  for doing this is (nominally) a secret, and I'm informed that for
+  regular user-space code there's nothing that actually cares about
+  whether it's correct. But my information could be wrong. (Note: it
+  looks like binutils might know how to compute this checksum? I'm not
   sure.)
+
+  [Update: Stefan Kanthak informs me that this algorithm is well
+  known, and in fact it looks `pefile has an MIT-licensed Python
+  implementation
+  <https://github.com/erocarrera/pefile/blob/master/pefile.py#L5150>`_
+  so I guess it might be good to fix this at some point.]
 
 - There's no test suite, so this whole thing will dissolve into a
   million tiny spikey shards of brokenness as soon as my back is
