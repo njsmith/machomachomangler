@@ -1,6 +1,15 @@
 redll
 =====
 
+.. image:: https://travis-ci.org/njsmith/redll.svg?branch=master
+   :target: https://travis-ci.org/njsmith/redll
+   :alt: Automated test status
+
+.. image:: https://codecov.io/gh/njsmith/redll/branch/master/graph/badge.svg
+   :target: https://codecov.io/gh/njsmith/redll
+   :alt: Test coverage
+
+
 This is a little tool that can read in a PE file (``.exe`` or
 ``.dll``) that is currently linked to ``foo.dll``, and rewrite it so
 that it becomes linked to ``bar.dll`` instead (similar to ``patchelf
