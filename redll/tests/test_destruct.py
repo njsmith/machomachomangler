@@ -22,8 +22,8 @@ def test_destruct():
         assert view_0_le.size == 5
         # smoke test
         repr(view)
-    assert view_0_le.next_offset == 5
-    assert view_1_be.next_offset == 6
+    assert view_0_le.end_offset == 5
+    assert view_1_be.end_offset == 6
 
     assert dict(view_0_le) == {"magic": 0x02010000, "byte": b"\x03"}
     assert dict(view_1_be) == {"magic": 0x00010203, "byte": b"\x04"}
@@ -34,6 +34,3 @@ def test_destruct():
 
     with pytest.raises(NotImplementedError):
         del view_0_le["magic"]
-
-    # TODO:
-    # - maybe rename next_offset to end_offset

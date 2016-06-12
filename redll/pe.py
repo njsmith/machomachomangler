@@ -91,7 +91,7 @@ def view_optional_header(coff_header):
     if size < OPTIONAL_HEADER_32.size:
         raise BadFile("PE optional header missing or too short ({} bytes)"
                       .format(size))
-    optional_header = OPTIONAL_HEADER_32.view(buf, coff_header.next_offset)
+    optional_header = OPTIONAL_HEADER_32.view(buf, coff_header.end_offset)
     if optional_header["Magic"] == OPTIONAL_MAGIC_32:
         pass
     elif optional_header["Magic"] == OPTIONAL_MAGIC_64:
@@ -99,7 +99,7 @@ def view_optional_header(coff_header):
             raise BadFile(
                 "PE optional header too short for 64-bit file ({} bytes)"
                 .format(size))
-        optional_header = OPTIONAL_HEADER_64.view(buf, coff_header.next_offset)
+        optional_header = OPTIONAL_HEADER_64.view(buf, coff_header.end_offset)
     else:
         raise BadFile("unrecognized magic in optional header: {:#04x}"
                       .format(optional_header["Magic"]))
@@ -111,17 +111,17 @@ def _view_array(struct_type, buf, offset, count):
     for i in range(count):
         view = struct_type.view(buf, next_offset)
         views.append(view)
-        next_offset = view.next_offset
+        next_offset = view.end_offset
     return views
 
 def view_data_directories(optional_header):
     return _view_array(DATA_DIRECTORY,
-                       optional_header.buf, optional_header.next_offset,
+                       optional_header.buf, optional_header.end_offset,
                        optional_header["NumberOfRvaAndSizes"])
 
 def view_sections(coff_header, data_directories):
     return _view_array(SECTION_TABLE_ENTRY,
-                       coff_header.buf, data_directories[-1].next_offset,
+                       coff_header.buf, data_directories[-1].end_offset,
                        coff_header["NumberOfSections"])
 
 PEHeaders = namedtuple("PE_HEADERS",
@@ -200,7 +200,7 @@ def _view_null_terminated_array(buf, offset, struct_type, null_field):
         if entry[null_field]:
             # this one is valid
             array.append(entry)
-            offset = entry.next_offset
+            offset = entry.end_offset
         else:
             # this one is null -- we're done
             return array
@@ -248,7 +248,7 @@ def add_section(orig_buf, data, characteristics):
             "etc. Sorry, I can't help you."
             .format(max_offset, len(orig_buf)))
 
-    end_of_sections = orig_pe_headers.sections[-1].next_offset
+    end_of_sections = orig_pe_headers.sections[-1].end_offset
     new_writer = BytesIO()
     # Copy over existing headers
     new_writer.write(orig_buf[:end_of_sections])

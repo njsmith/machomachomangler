@@ -97,5 +97,5 @@ class StructView(MutableMapping):
         return self._struct_type.size
 
     @property
-    def next_offset(self):
+    def end_offset(self):
         return self.offset + self.size
