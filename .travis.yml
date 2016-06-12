@@ -1,0 +1,18 @@
+language: python
+python:
+  - 3.5
+
+sudo: false
+
+addons:
+  apt:
+    install:
+      - wine
+      - wine32
+      - wine64
+
+script:
+  - py.test --cov-config=.coveragerc redll
+
+after_success:
+  - codecov
