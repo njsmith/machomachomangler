@@ -17,7 +17,7 @@ before_install:
   - pip install codecov
 
 script:
-  - py.test --cov-config=.coveragerc redll
+  - py.test --cov=redll --cov-config=.coveragerc redll
 
 after_success:
   - codecov
