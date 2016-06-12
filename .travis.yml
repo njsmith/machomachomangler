@@ -12,6 +12,10 @@ addons:
       - wine32
       - wine64
 
+before_install:
+  - pip install -r test-requirements.txt
+  - pip install codecov
+
 script:
   - py.test --cov-config=.coveragerc redll
 
