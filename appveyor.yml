@@ -9,10 +9,11 @@ environment:
     - PYTHON: "C:\\Python35"
 
 build_script:
-  - SET PATH=%PYTHON%;%PATH%
-  - pip install -U pip
-  - pip install -r test-requirements.txt
-  - pip install codecov
+  - "SET PATH=%PYTHON%;%PYTHON%\\Scripts;;%PATH%"
+  - "python --version"
+  - "python -c \"import struct; print(struct.calcsize('P') * 8)\""
+  - "pip install -r test-requirements.txt"
+  - "pip install codecov"
 
 test_script:
   - py.test --cov=redll --cov-config=.coveragerc redll
