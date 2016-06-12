@@ -92,13 +92,9 @@ implied" stuff is extra true. Some particular known limitations:
   <https://github.com/erocarrera/pefile/blob/master/pefile.py#L5150>`_
   so I guess it might be good to fix this at some point.]
 
-- There's no test suite, so this whole thing will dissolve into a
-  million tiny spikey shards of brokenness as soon as my back is
-  turned.
-
-- Only tested on **Python 3.4**. Probably any Python 3 will work, and
-  Python 2 definitely won't without some fixes. (There's lots of
-  fiddly byte-string handling.)
+- Only tested on **Python 3.4 and 3.5**. Probably any Python 3 will
+  work, and Python 2 definitely won't without some fixes. (There's
+  lots of fiddly byte-string handling.)
 
 - I'm lazy, so I just load the whole ``.exe`` or ``.dll`` file into
   memory -- maybe several copies of it. This actually wouldn't be too
