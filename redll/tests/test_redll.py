@@ -15,11 +15,11 @@ def run_exe(path, *, expect_success=True):
         runner = []
     else:
         runner = ["wine"]
-    ran = subprocess.run(runner + [path])
+    returncode = subprocess.call(runner + [path])
     if expect_success:
-        assert ran.returncode == 0
+        assert returncode == 0
     else:
-        assert ran.returncode != 0
+        assert returncode != 0
 
 def test_redll_end_to_end(tmpdir, monkeypatch):
     monkeypatch.setenv("WINEPREFIX", tmpdir.join("wineprefix").strpath)
