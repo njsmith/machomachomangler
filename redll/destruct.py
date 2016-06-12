@@ -35,7 +35,7 @@ class StructType(object):
         assert len(values) == len(value_dict)
         return values
 
-    def pack_into(self, buf, offset, value_dict):
+    def _pack_into(self, buf, offset, value_dict):
         return struct.pack_into(self._struct_string,
                                 buf, offset,
                                 *self._values_from_dict(value_dict))
@@ -75,7 +75,7 @@ class StructView(MutableMapping):
     def __setitem__(self, k, v):
         value_dict = self._value_dict()
         value_dict[k] = v
-        self._struct_type.pack_into(self.buf, self.offset, value_dict)
+        self._struct_type._pack_into(self.buf, self.offset, value_dict)
 
     def __delitem__(self, k):
         assert False
