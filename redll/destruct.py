@@ -3,7 +3,7 @@ from collections.abc import MutableMapping
 
 # Usage:
 #   COFF_HEADER = StructType("COFF_HEADER", [
-#     ("<i4", "magic"),
+#     ("I", "magic"),
 #     ...
 #   ])
 #
