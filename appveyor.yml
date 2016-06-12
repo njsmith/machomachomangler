@@ -16,6 +16,4 @@ build_script:
 
 test_script:
   - py.test --cov=redll --cov-config=.coveragerc redll
-
-after_success:
   - codecov
