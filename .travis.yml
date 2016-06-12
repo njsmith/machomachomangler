@@ -7,7 +7,7 @@ sudo: false
 
 addons:
   apt:
-    install:
+    packages:
       - wine
       - wine32
       - wine64
