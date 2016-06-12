@@ -9,8 +9,6 @@ addons:
   apt:
     packages:
       - wine
-      - wine32
-      - wine64
 
 before_install:
   - pip install -r test-requirements.txt
