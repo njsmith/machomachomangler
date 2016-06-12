@@ -1,0 +1,21 @@
+skip_tags: true
+clone_depth: 1
+
+os: Visual Studio 2015
+
+environment:
+  matrix:
+    - PYTHON: "C:\\Python34"
+    - PYTHON: "C:\\Python35"
+
+build_script:
+  - SET PATH=%PYTHON%;%PATH%
+  - pip install -U pip
+  - pip install -r test-requirements.txt
+  - pip install codecov
+
+test_script:
+  - py.test --cov=redll --cov-config=.coveragerc redll
+
+after_success:
+  - codecov
