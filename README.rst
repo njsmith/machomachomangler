@@ -3,7 +3,11 @@ redll
 
 .. image:: https://travis-ci.org/njsmith/redll.svg?branch=master
    :target: https://travis-ci.org/njsmith/redll
-   :alt: Automated test status
+   :alt: Automated test status (Travis)
+
+.. image:: https://ci.appveyor.com/api/projects/status/9p8cuhx8vwn2i2jp?svg=true
+   :target: https://ci.appveyor.com/project/njsmith/redll
+   :alt: Automated test status (Appveyor)
 
 .. image:: https://codecov.io/gh/njsmith/redll/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/njsmith/redll
