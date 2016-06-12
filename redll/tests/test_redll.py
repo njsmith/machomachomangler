@@ -7,7 +7,7 @@ import pytest
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def run_exe(path, *, expect_success=True):
+def run_exe(path, *, expect_success=True):  # pragma: no cover
     if hasattr(path, "strpath"):
         path = path.strpath
     path = os.path.abspath(path)

@@ -1,8 +1,12 @@
 import struct
 from collections.abc import MutableMapping
 
+# Thin but extremely handy wrapper around the 'struct' module to work with
+# binary data in memory.
+#
 # Usage:
 #   COFF_HEADER = StructType("COFF_HEADER", [
+#     # struct code, field name
 #     ("I", "magic"),
 #     ...
 #   ])
@@ -13,6 +17,7 @@ from collections.abc import MutableMapping
 #   header["magic"]
 #   # Mutates 'buf' in-place
 #   header["magic"] = whatever
+
 class StructType(object):
     def __init__(self, name, fields, endian="<"):
         self._name = name
@@ -78,7 +83,8 @@ class StructView(MutableMapping):
         self._struct_type._pack_into(self.buf, self.offset, value_dict)
 
     def __delitem__(self, k):
-        assert False
+        raise NotImplementedError(
+            "can't delete fields from fixed-length struct")
 
     def __len__(self):
         return len(self._struct_type._names)
