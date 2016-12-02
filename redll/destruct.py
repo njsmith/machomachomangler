@@ -92,6 +92,9 @@ class StructView(MutableMapping):
     def __iter__(self):
         return iter(self._struct_type._names)
 
+    def cast(self, new_type):
+        return new_type.view(self.buf, self.offset)
+
     @property
     def size(self):
         return self._struct_type.size
