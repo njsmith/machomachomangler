@@ -7,6 +7,10 @@ import pytest
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 
+can_run_exe = (shutil.which("wine") is not None or os.name == "nt")
+need_run_exe = pytest.mark.skipif(not can_run_exe,
+                                  reason="needs wine or windows")
+
 def run_exe(path, *, expect_success=True):  # pragma: no cover
     if hasattr(path, "strpath"):
         path = path.strpath
@@ -21,6 +25,7 @@ def run_exe(path, *, expect_success=True):  # pragma: no cover
     else:
         assert returncode != 0
 
+@need_run_exe
 def test_redll_end_to_end(tmpdir, monkeypatch):
     monkeypatch.setenv("WINEPREFIX", tmpdir.join("wineprefix").strpath)
     for arch in ["i686", "x86_64"]:
