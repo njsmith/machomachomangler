@@ -17,7 +17,7 @@ from .pe_info import (
     DELAY_LOAD_DIRECTORY_TABLE,
     )
 
-from .util import round_to_next
+from .util import round_to_next, read_asciiz
 
 # Theory of operation
 # ===================
@@ -175,14 +175,6 @@ def file_offset_to_rva(sections, offset):
                          "PointerToRawData", "SizeOfRawData",
                          "VirtualAddress", "VirtualSize",
                          "file offset")
-
-def get_asciiz(buf, offset):
-    asciiz = b""
-    # next line will break on py2:
-    while buf[offset]:
-        asciiz += buf[offset:offset+1]
-        offset += 1
-    return asciiz
 
 def _data_directory_offset(pe_headers, data_directory_index):
     data_directory = pe_headers.data_directories[data_directory_index]
@@ -352,7 +344,7 @@ def redll(buf, mapping):
     def rewrite_names(viewer, name_field):
         for s in viewer(pe_headers):
             name_offset = rva_to_file_offset(pe_headers.sections, s[name_field])
-            name = get_asciiz(new_buf, name_offset)
+            name, _ = read_asciiz(new_buf, name_offset)
             # lowercase name for case-insensitive matching
             name = name.decode("ascii").lower().encode("ascii")
             if name in rva_mapping:
