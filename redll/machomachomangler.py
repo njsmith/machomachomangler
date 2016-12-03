@@ -1,16 +1,156 @@
 import copy
 import attr
 from .util import (
-    read_uleb128, write_uleb128, read_sleb128, write_sleb128, read_asciiz)
+    round_to_next,
+    read_uleb128, write_uleb128, read_sleb128, write_sleb128,
+    read_asciiz,
+)
 from .macho_info import *
 
-# XX FIXME: need to handle fat binaries
+################################################################
+# Fat binaries
+################################################################
+
+def macho_macho_mapper(fn, buf):
+    # If buf is a fat binary, split it into its constituent objects, call fn
+    # on each, and then reconstruct a fat binary from the return values.
+    # If buf is a mach-o binary, then just call fn on it and return the
+    # result.
+    if buf[:4] == FAT_MAGIC_BYTES:
+        header = FAT_HEADER.view(buf, 0)
+        assert header["magic"] == FAT_MAGIC
+
+        # Read out the per-arch headers:
+        arch_offset = header.end_offset
+        archs = []
+        for _ in range(header["nfat_arch"]):
+            archs.append(FAT_ARCH.view(buf, arch_offset))
+            arch_offset = archs[-1].end_offset
+        # Make a note of where the arch headers end and the data starts --
+        # we'll want this later.
+        data_start_offset = arch_offset
+
+        # Pull out each contained object and process it
+        new_subbufs = []
+        for arch in archs:
+            start = arch["offset"]
+            end = arch["offset"] + arch["size"]
+            new_subbufs.append(fn(buf[start:end]))
+
+        # Now we'll make a new fat object. The initial headers will have
+        # identical layout to the original (though some of the values inside
+        # will be different), so we start with an empty file of that
+        # size, which we'll fill in incrementally. (This pre-padding makes it
+        # easy to alternate between filling in headers and filling in the
+        # actual contained objects.)
+        new_buf = bytearray(data_start_offset)
+        new_header = FAT_HEADER.view(new_buf, 0)
+        new_header.update(header)
+        for arch, new_subbuf in zip(archs, new_subbufs):
+            # Append the contained object to the new file (respecting
+            # alignment)
+            align_size = 2**arch["align"]
+            new_subbuf_offset = round_to_next(len(new_buf), align_size)
+            new_buf += b"\x00" * (new_subbuf_offset - len(new_buf))
+            assert len(new_buf) == new_subbuf_offset
+            new_buf += new_subbuf
+            # Now that we know where it ended up, fill in the corresponding
+            # header.
+            new_arch = FAT_ARCH.view(new_buf, arch.offset)
+            new_arch.update(arch)
+            new_arch["offset"] = new_subbuf_offset
+            new_arch["size"] = len(new_subbuf)
+        return new_buf
+    else:
+        # Probably this is a plain Mach-O object? To check we call
+        # view_mach_header for its validity-checking side-effects; it'll raise
+        # an exception if not.
+        view_mach_header(buf)
+        return fn(buf)
+
+
+################################################################
+# Mach-O basics
+################################################################
+
+def view_mach_header(buf):
+    header = MACH_HEADER.view(buf, 0)
+    if header["magic"] == MH_MAGIC:
+        sizeof_pointer = 4
+    elif header["magic"] == MH_MAGIC_64:
+        header = MACH_HEADER_64.view(buf, 0)
+        sizeof_pointer = 8
+    elif header["magic"] in [MH_CIGAM, MH_CIGAM_64]:
+        raise ValueError(
+            "This file is big-endian, which I don't currently support --"
+            " sorry! patches accepted")
+    else:
+        raise ValueError("This doesn't seem to be a MACH binary?")
+    # Probably most of the other Mach-O subtypes are similar enough that most
+    # things this code does would work, but since they're so exotic let's play
+    # it safe for now...
+    if header["filetype"] not in {MH_EXECUTE, MH_DYLIB, MH_BUNDLE}:
+        raise ValueError("Unrecognized Mach-O file type {:#x}"
+                         .format(header["filetype"]))
+    return header, sizeof_pointer
+
+
+def view_load_command(buf, offset):
+    load_command = LOAD_COMMAND.view(buf, offset)
+    if load_command["cmd"] in LC_ID_TO_STRUCT:
+        load_command = load_command.cast(LC_ID_TO_STRUCT[load_command["cmd"]])
+    return load_command
+
+def view_load_commands(header):
+    offset = header.end_offset
+    for _ in range(header["ncmds"]):
+        load_command = view_load_command(header.buf, offset)
+        yield load_command
+        offset += load_command["cmdsize"]
+
+
+def replace_linkedit_chunk(buf, old_offset, old_size, new_chunk):
+    # buf must be writeable; it's modified in place
+    # returns: new_offset
+    for load_command in view_load_commands(view_mach_header(buf)[0]):
+        if load_command["cmd"] in {LC_SEGMENT, LC_SEGMENT_64}:
+            if load_command["segname"].strip(b"\x00") == b"__LINKEDIT":
+                __LINKEDIT = load_command
+                break
+    else:
+        raise ValueError("can't find __LINKEDIT segment")
+
+    # Get rid of the old chunk, to avoid any confusion
+    if old_offset + old_size == len(buf):
+        # If it's at the end, we can truncate.
+        del buf[old_offset:]
+        __LINKEDIT["filesize"] -= old_size
+        __LINKEDIT["vmsize"] -= old_size
+        old_size = 0
+    else:
+        # Otherwise, set it to all-zero.
+        buf[old_offset : old_offset+old_size] = b"\x00" * old_size
+
+    # Now we want to put the new chunk in.
+    if len(new_chunk) < old_size:
+        # We can replace it in-place
+        buf[old_offset : old_offset+len(new_chunk)] = new_chunk
+        return old_offset
+    else:
+        # We have to append to the end of the file
+        if __LINKEDIT["fileoff"] + __LINKEDIT["filesize"] != len(buf):
+            raise ValueError("__LINKEDIT is not at end of file")
+        new_offset = len(buf)
+        buf += new_chunk
+        __LINKEDIT["filesize"] += len(new_chunk)
+        __LINKEDIT["vmsize"] += len(new_chunk)
+        return new_offset
 
 ################################################################
 # Binding tables
 ################################################################
 
-@attr.s
+@attr.s(slots=True)
 class Binding:
     segment_index = attr.ib()
     segment_offset = attr.ib()
@@ -169,28 +309,6 @@ def encode_bind_table(binds, *, sizeof_pointer):
 # Import symbol mangling
 ################################################################
 
-def view_mach_header(buf):
-    header = MACH_HEADER.view(buf, 0)
-    if header["magic"] == MH_MAGIC:
-        sizeof_pointer = 4
-    elif header["magic"] == MH_MAGIC_64:
-        header = MACH_HEADER_64.view(buf, 0)
-        sizeof_pointer = 8
-    elif header["magic"] in [MH_CIGAM, MH_CIGAM_64]:
-        raise ValueError(
-            "This file is big-endian, which I don't currently support --"
-            " sorry! patches accepted")
-    else:
-        raise ValueError("This doesn't seem to be a MACH binary?")
-    return header, sizeof_pointer
-
-def view_load_commands(header):
-    offset = header.end_offset
-    for _ in range(header["ncmds"]):
-        load_command = LOAD_COMMAND.view(header.buf, offset)
-        yield load_command
-        offset += load_command["cmdsize"]
-
 # libraries_to_mangle is a mapping
 #   {dylib name: symbol name mangler}
 # TODO:
@@ -207,7 +325,6 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     dyld_info = None
     for load_command in view_load_commands(header):
         if load_command["cmd"] in LOAD_DYLIB_COMMANDS:
-            load_command = load_command.cast(DYLIB_COMMAND)
             print(load_command)
             name, _ = read_asciiz(
                 load_command.buf,
@@ -217,22 +334,17 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
             if name in libraries_to_mangle:
                 print("Making {} into a weak dylib".format(name))
                 load_command["cmd"] = LC_LOAD_WEAK_DYLIB
-        elif load_command["cmd"] in {LC_SEGMENT, LC_SEGMENT_64}:
-            if load_command["cmd"] == LC_SEGMENT:
-                load_command = load_command.cast(SEGMENT_COMMAND)
-            else:
-                load_command = load_command.cast(SEGMENT_COMMAND_64)
-            print(load_command)
-            if load_command["segname"].strip(b"\x00") == b"__LINKEDIT":
-                __LINKEDIT = load_command
         elif load_command["cmd"] in {LC_DYLD_INFO, LC_DYLD_INFO_ONLY}:
-            dyld_info = load_command.cast(DYLD_INFO_COMMAND)
+            dyld_info = load_command
             print(load_command)
 
-    if __LINKEDIT is None:
-        raise ValueError("can't find __LINKEDIT segment")
-    if __LINKEDIT["fileoff"] + __LINKEDIT["filesize"] != len(buf):
-        raise ValueError("__LINKEDIT is not at end of file")
+    exports = list(decode_export_trie(buf, dyld_info["export_off"]))
+    reencoded = encode_export_trie(exports)
+    exports2 = list(decode_export_trie(reencoded, 0))
+    from pprint import pprint
+    pprint(exports)
+    pprint(exports2)
+    assert sorted(exports) == sorted(exports2)
 
     bind = list(decode_bind_table(buf,
                                   dyld_info["bind_off"],
@@ -243,10 +355,10 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     # quick smoke test
     reencoded = encode_bind_table(bind, sizeof_pointer=sizeof_pointer)
     bind2 = list(decode_bind_table(reencoded, 0, len(reencoded),
-                                       sizeof_pointer=sizeof_pointer,
-                                       lazy=False))
+                                   sizeof_pointer=sizeof_pointer,
+                                   lazy=False))
     assert bind == bind2
-    del bind2
+    del reencoded, bind2
 
     mangle_table = {}  # {ordinal: mangle function}
     for name, mangler in libraries_to_mangle.items():
@@ -261,7 +373,7 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
             o = binding.library_ordinal
             if o in mangle_table:
                 binding.symbol_name = mangle_table[o](binding.symbol_name)
-                binding.library_ordinal = -2
+                binding.library_ordinal = BIND_SPECIAL_DYLIB_FLAT_LOOKUP
 
     # Mangle the eager bindings
     mangle_bindings(bind)
@@ -270,8 +382,8 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     # move them into the eager bindings table
     eagerified = []
     lazy = list(decode_bind_table(buf,
-                                  dyld_info["lazy_off"],
-                                  dyld_info["lazy_size"],
+                                  dyld_info["lazy_bind_off"],
+                                  dyld_info["lazy_bind_size"],
                                   sizeof_pointer=sizeof_pointer,
                                   lazy=True))
     for binding in lazy:
@@ -280,23 +392,16 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     mangle_bindings(eagerified)
     bind += eagerified
 
-    # Wipe out the old bind table, to make sure we aren't using it
-    # accidentally
-    bind_off = dyld_info["bind_off"]
-    bind_off_end = dyld_info["bind_off"] + dyld_info["bind_size"]
-    buf[bind_off:bind_off_end] = b"\x00"
-
     # Make the new bind table
     new_bind_buf = encode_bind_table(bind, sizeof_pointer=sizeof_pointer)
 
-    # Update DYLD_INFO to point to where it will be
-    dyld_info["bind_off"] = len(buf)
-    dyld_info["bind_size"] = len(new_bind_buf)
+    # Add it to the __LINKEDIT segment
+    new_bind_offset = replace_linkedit_chunk(
+        buf, dyld_info["bind_off"], dyld_info["bind_size"], new_bind_buf)
 
-    # Add it to __LINKEDIT
-    buf += new_bind_buf
-    __LINKEDIT["filesize"] += len(new_bind_buf)
-    __LINKEDIT["vmsize"] += len(new_bind_buf)
+    # Update DYLD_INFO to point to where it will be
+    dyld_info["bind_off"] = new_bind_offset
+    dyld_info["bind_size"] = len(new_bind_buf)
 
     return buf
 
@@ -347,3 +452,183 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     #
     # I still don't know why strip refused to remove it though... that
     # indirect symbols thing? what's that about?
+
+
+################################################################
+# Exports
+################################################################
+
+# trieWalk skips over terminal information while searching the trie for a
+# specific symbol
+# then findShallowExportedSymbol decodes the terminal information
+
+# EXPORT_SYMBOL_FLAGS_KIND_MASK =                          0x03
+# EXPORT_SYMBOL_FLAGS_KIND_REGULAR =                       0x00
+# EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL =                  0x01
+# EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION =                    0x04
+# EXPORT_SYMBOL_FLAGS_REEXPORT =                           0x08
+# EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER =                  0x10
+
+@attr.s(slots=True)
+class Export:
+    symbol = attr.ib()
+    flags = attr.ib()
+    # for re-exports
+    library_ordinal = attr.ib(default=None)
+    imported_name = attr.ib(default=None)
+    # for stub-and-resolver
+    stub = attr.ib(default=None)
+    resolver = attr.ib(default=None)
+    # for everything else
+    address = attr.ib(default=None)
+
+def decode_export_trie(buf, start):
+    print(buf[start:start + 100].hex())
+    def decode_node(prefix, p):
+        print("decoding prefix", prefix, " at ", p)
+        terminal_size, p = read_uleb128(buf, p)
+        print("terminal_size", terminal_size)
+        if terminal_size:
+            flags, p = read_uleb128(buf, p)
+            print("flags =", flags)
+            if flags & EXPORT_SYMBOL_FLAGS_REEXPORT:
+                library_ordinal, p = read_uleb128(buf, p)
+                imported_name, p = read_asciiz(buf, p)
+                if imported_name == b"":
+                    imported_name = prefix
+                yield Export(symbol=prefix, flags=flags,
+                             library_ordinal=library_ordinal,
+                             imported_name=imported_name)
+            elif flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER:
+                stub, p = read_uleb128(buf, p)
+                resolver, p = read_uleb128(buf, p)
+                yield Export(symbol=prefix, flags=flags,
+                             stub=stub, resolver=resolver)
+            else:
+                address, p = read_uleb128(buf, p)
+                yield Export(symbol=prefix, flags=flags, address=address)
+        branches = buf[p]
+        p += 1
+        print("branches", branches)
+        for _ in range(branches):
+            child_prefix, p = read_asciiz(buf, p)
+            child_offset, p = read_uleb128(buf, p)
+            yield from decode_node(prefix + child_prefix, start + child_offset)
+
+    return decode_node(b"", start)
+
+# The export trie has a very oddly designed format, where:
+# - you have to start with the root at offset 0
+# - each node contains the offsets of the children
+# - the offsets are variable-length encoded
+# This creates a nice circularity, where the offset of the children of course
+# is determined by the encoded length of the parent (or at least the root),
+# and the encoded length of the parent (/root) is determined by the offset of
+# the children.
+#
+# Our strategy:
+# - first, insert all export items into the "deep trie", which is like a trie
+#   except each node consumes exactly 1 byte. So you get deep, inefficient
+#   chains of nodes with exactly 1 child.
+# - then, roll this up into a proper trie. While doing this:
+#   - compute the fixed part of each node (the "payload")
+#   - make an initial speculative guess as to the final offset of the
+#     node. Very speculative, i.e., wrong, i.e., we always guess offset 0.
+# - Linearize the trie order (parents before children)
+# - Encode the trie. When serializing a parent, use our current guess as to
+#   the offsets of its children. As we process each node, update our guess
+#   about its offset based on where it ended up on this pass, to use on the
+#   next pass.
+# - Repeat until we manage a complete pass without any offsets changing.
+
+# Fake trie where each step consumes exactly 1 byte
+@attr.s(slots=True)
+class DeepNode:
+    # maps bytestrings to DeepNode objects
+    children = attr.ib(default=attr.Factory(dict))
+    export = attr.ib(default=None)
+
+def _deep_tree(exports):
+    deep_root = DeepNode()
+    for export in exports:
+        suffix = export.symbol
+        node = deep_root
+        while suffix:
+            byte = suffix[0:1]
+            suffix = suffix[1:]
+            if byte not in node.children:
+                node.children[byte] = DeepNode()
+            node = node.children[byte]
+        node.export = export
+    return deep_root
+
+# Real trie
+@attr.s(slots=True)
+class TrieNode:
+    payload = attr.ib()
+    # [(prefix, child), (prefix, child), ...]
+    children = attr.ib(default=attr.Factory(list))
+    offset_guess = attr.ib(default=0)
+
+def _trieify(deep_node):
+    if deep_node.export is not None:
+        e = deep_node.export
+        terminal_buf = bytearray()
+        terminal_buf += write_uleb128(e.flags)
+        if e.flags & EXPORT_SYMBOL_FLAGS_REEXPORT:
+            terminal_buf += write_uleb128(e.library_ordinal)
+            if e.imported_name != e.symbol:
+                terminal_buf += e.imported_name
+            terminal_buf.append(0)
+        elif e.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER:
+            terminal_buf += write_uleb128(e.stub)
+            terminal_buf += write_uleb128(e.resolver)
+        else:
+            terminal_buf += write_uleb128(e.address)
+        payload = write_uleb128(len(terminal_buf)) + terminal_buf
+    else:
+        # non-terminal marker
+        payload = bytes([0])
+    trie_node = TrieNode(payload=payload)
+    for prefix, deep_child in sorted(deep_node.children.items()):
+        # Collapse chains of single-child nodes:
+        while deep_child.export is None and len(deep_child.children) == 1:
+            next_byte, deep_child = next(iter(deep_child.children.items()))
+            prefix += next_byte
+        child_trie_node = _trieify(deep_child)
+        trie_node.children.append((prefix, child_trie_node))
+    return trie_node
+
+def encode_export_trie(exports):
+    if not exports:
+        return bytearray()
+
+    deep_root = _deep_tree(exports)
+    trie_root = _trieify(deep_root)
+
+    trie_nodes = []
+    def _linearize_trie(node):
+        trie_nodes.append(node)
+        for _, child in node.children:
+            _linearize_trie(child)
+    _linearize_trie(trie_root)
+    assert trie_nodes[0] is trie_root
+
+    while True:
+        print(trie_root)
+        buf = bytearray()
+        any_offset_changed = False
+        for node in trie_nodes:
+            new_offset = len(buf)
+            if new_offset != node.offset_guess:
+                node.offset_guess = new_offset
+                any_offset_changed = True
+            buf += node.payload
+            buf.append(len(node.children))
+            for prefix, child in node.children:
+                buf += prefix
+                buf.append(0)
+                buf += write_uleb128(child.offset_guess)
+        if not any_offset_changed:
+            break
+    return buf
