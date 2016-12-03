@@ -95,6 +95,13 @@ class StructView(MutableMapping):
     def cast(self, new_type):
         return new_type.view(self.buf, self.offset)
 
+    # def copy(self):
+    #     # Make a copy of the underlying buffer span and return a view onto it
+    #     copy_buf = self.buf[self.offset:self.end_offset]
+    #     if not isinstance(copy_buf, bytearray):
+    #         copy_buf = bytearray(copy_buf)
+    #     return self._struct_type.view(copy_buf, 0)
+
     @property
     def size(self):
         return self._struct_type.size
