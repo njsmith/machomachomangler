@@ -1,12 +1,15 @@
 from .destruct import StructType
 
-# Mangle exported symbols
-# Import weakly, from /no-such-directory/mangled-dylib.dylib
-# Mangle imported symbols, and make them single-level namespace ("dynamic
-# lookup")
-
-
-# /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.
+# This file contains structs and constants describing the Mach-O format.
+#
+# Reference:
+#
+#   Mostly the MacOSX header files, which can be found in e.g.:
+#     /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk/usr/include/
+#
+# In particular:
+#   mach-o/loader.h
+#   mach-o/fat.h
 
 uint32_t = "I"
 uint64_t = "Q"
@@ -18,7 +21,29 @@ cpu_subtype_t = integer_t
 # mach/vm_prot.h
 vm_prot_t = "i"
 
-header_fields = [
+FAT_MAGIC = 0xcafebabe
+FAT_CIGAM = 0xbebafeca
+# Fat binary structs are always big-endian
+FAT_MAGIC_BYTES = bytes.fromhex("cafebabe")
+
+FAT_HEADER = StructType(
+    "FAT_HEADER", [
+        (uint32_t, "magic"),
+        (uint32_t, "nfat_arch"),
+    ],
+    endian=">")
+
+FAT_ARCH = StructType(
+    "FAT_ARCH", [
+        (cpu_type_t, "cputype"),
+        (cpu_subtype_t, "cpusubtype"),
+        (uint32_t, "offset"),
+        (uint32_t, "size"),
+        (uint32_t, "align"), # needs alignment to 2**<this value>
+    ],
+    endian=">")
+
+_mach_header_fields = [
         (uint32_t, "magic"),
         (cpu_type_t, "cputype"),
         (cpu_subtype_t, "cpusubtype"),
@@ -29,7 +54,7 @@ header_fields = [
     ]
 
 MACH_HEADER = StructType(
-    "MACH_HEADER", header_fields)
+    "MACH_HEADER", _mach_header_fields)
 
 # Magic field (32-bit architectures)
 MH_MAGIC = 0xfeedface
@@ -37,7 +62,7 @@ MH_MAGIC = 0xfeedface
 MH_CIGAM = 0xcefaedfe
 
 MACH_HEADER_64 = StructType(
-    "MACH_HEADER", header_fields + [
+    "MACH_HEADER", _mach_header_fields + [
         (uint32_t, "reserved"),
     ])
 
@@ -47,8 +72,12 @@ MH_MAGIC_64 = 0xfeedfacf
 MH_CIGAM_64 = 0xcffaedfe
 
 # File types (the ones we care about)
+# regular executables:
 MH_EXECUTE =     0x2             # demand paged executable file
+# ".dylib":
 MH_DYLIB =       0x6             # dynamically bound shared library
+# ".so":
+MH_BUNDLE =      0x8             # dynamically bound bundle file
 
 ## Load commands
 
@@ -90,16 +119,18 @@ LC_REQ_DYLD = 0x80000000
 
 LC_SEGMENT = 0x1
 LC_SYMTAB = 0x2
+LC_DYSYMTAB = 0xb
 LC_LOAD_DYLIB = 0xc
+LC_ID_DYLIB = 0xd
 LC_LOAD_WEAK_DYLIB = 0x18 | LC_REQ_DYLD
-LC_LOAD_REEXPORT_DYLIB = 0x1f | LC_REQ_DYLD
+LC_REEXPORT_DYLIB = 0x1f | LC_REQ_DYLD
 LC_LOAD_UPWARD_DYLIB = 0x23 | LC_REQ_DYLD
 
 # These are the commands that load dylibs.
 # When a bind opcode refers to "library 2", it means the second command
 # (1-based) load command that falls in this set:
 LOAD_DYLIB_COMMANDS = {LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
-                       LC_LOAD_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB}
+                       LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB}
 # (it's 1-based because -2 means flat namespace, -1 means main executable, and
 # 0 means within the same file)
 
@@ -132,6 +163,8 @@ def _command(name, fields):
 
 LOAD_COMMAND = _command("LOAD_COMMAND", [])
 
+LC_ID_TO_STRUCT = {}
+
 def _segment_fields(addr_t):
     return [
         ("16s", "segname"),
@@ -146,7 +179,10 @@ def _segment_fields(addr_t):
     ]
 
 SEGMENT_COMMAND = _command("SEGMENT_COMMAND", _segment_fields(uint32_t))
+LC_ID_TO_STRUCT[LC_SEGMENT] = SEGMENT_COMMAND
+
 SEGMENT_COMMAND_64 = _command("SEGMENT_COMMAND_64", _segment_fields(uint64_t))
+LC_ID_TO_STRUCT[LC_SEGMENT_64] = SEGMENT_COMMAND_64
 
 # load command variable length strings are uint32_t, which is the offset from
 # the start of the load command struct
@@ -171,6 +207,9 @@ DYLIB_COMMAND = _command(
         (uint32_t, "dylib_current_version"),
         (uint32_t, "dylib_compatibility_version"),
     ])
+for lc in [LC_ID_DYLIB, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB,
+           LC_LOAD_UPWARD_DYLIB]:
+    LC_ID_TO_STRUCT[lc] = DYLIB_COMMAND
 
 # Interpreting this involves stab.h and nlist.h
 SYMTAB_COMMAND = _command(
@@ -180,8 +219,10 @@ SYMTAB_COMMAND = _command(
         (uint32_t, "stroff"),
         (uint32_t, "strsize"),
     ])
+LC_ID_TO_STRUCT[LC_SYMTAB] = SYMTAB_COMMAND
 
-# There's a very long and confusing about this struct in mach-o/archive.h
+# There's a very long and confusing comment about this struct in
+# mach-o/loader.h
 DYSYMTAB_COMMAND = _command(
     "DYSYMTAB_COMMAND", [
         (uint32_t, "ilocalsym"),
@@ -209,6 +250,7 @@ DYSYMTAB_COMMAND = _command(
         (uint32_t, "locreloff"),
         (uint32_t, "nlocrel"),
     ])
+LC_ID_TO_STRUCT[LC_DYSYMTAB] = DYSYMTAB_COMMAND
 
 # LC_DYLD_INFO, LC_DYLD_INFO_ONLY
 DYLD_INFO_COMMAND = _command(
@@ -233,6 +275,8 @@ DYLD_INFO_COMMAND = _command(
         (uint32_t, "export_off"),
         (uint32_t, "export_size"),
         ])
+LC_ID_TO_STRUCT[LC_DYLD_INFO] = DYLD_INFO_COMMAND
+LC_ID_TO_STRUCT[LC_DYLD_INFO_ONLY] = DYLD_INFO_COMMAND
 
 BIND_TYPE_POINTER =                                      1
 BIND_TYPE_TEXT_ABSOLUTE32 =                              2
