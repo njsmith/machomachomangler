@@ -10,6 +10,7 @@ extern int native_func();
 
 int main(int argc, char** argv)
 {
+    printf("main-envvar started w/ sizeof(void*) = %i\n", sizeof(void*));
     printf("native_int == %i\n", native_int);
     printf("native_func() == %i\n", native_func());
     return !(native_int == 13 && native_func() == 14);
