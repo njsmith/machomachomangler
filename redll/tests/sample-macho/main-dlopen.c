@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <dlfcn.h>
 
 void dlcheck(char const* op, void* ptr)
@@ -19,7 +20,7 @@ void dlcheck(char const* op, void* ptr)
 
 int main(int argc, char** argv)
 {
-    print("main-dlopen started with sizeof(void*) = %i\n", sizeof(void*));
+    printf("main-dlopen started with sizeof(void*) = %lu\n", sizeof(void*));
 
     printf("preloading mangled native lib\n");
     void* preload = dlopen("./mangled-native-lib.dylib", RTLD_LAZY);

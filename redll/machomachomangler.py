@@ -644,7 +644,7 @@ def _roundtrip_smoketest(buf):
 # Pynativelib imports rewriter
 ################################################################
 
-def _pynativelib_mangle_imports(header, libraries_to_mangle):
+def _pynativelib_mangle_imports(header, sizeof_pointer, libraries_to_mangle):
     # buf must be a bytearray, which we modify in place
     # this rewrites the load command table, so if you have a load command view
     # then calling this function will invalidate it.
@@ -657,7 +657,7 @@ def _pynativelib_mangle_imports(header, libraries_to_mangle):
     library_ordinal = 0
     mangled_libraries = set()
     ordinal_to_mangler = {}
-    new_header_buf = buf[:header.offset + header["sizeofcmds"]]
+    new_header_buf = buf[:header.end_offset + header["sizeofcmds"]]
     for lc in view_load_commands(header, LOAD_DYLIB_COMMANDS):
         library_ordinal += 1
         name, _ = read_asciiz(lc.buf, lc.offset + lc["dylib_name"])
@@ -665,7 +665,7 @@ def _pynativelib_mangle_imports(header, libraries_to_mangle):
         if basename in libraries_to_mangle:
             new_name, symbol_mangler = libraries_to_mangle[basename]
             print("Replacing import of {}\n  with weak import of {}"
-                  .format(old_name, new_name))
+                  .format(name, new_name))
 
             # Remember the ordinal for later
             ordinal_to_mangler[library_ordinal] = symbol_mangler
@@ -677,6 +677,7 @@ def _pynativelib_mangle_imports(header, libraries_to_mangle):
             new_lc["cmd"] = LC_LOAD_WEAK_DYLIB
             new_lc["dylib_name"] = len(new_lc_buf)
             new_lc_buf += new_name + b"\x00"
+            pad_inplace(new_lc_buf, align=sizeof_pointer)
             new_lc["cmdsize"] = len(new_lc_buf)
             # And use the new one.
             # This slice assignment is quadratic but whatever.
@@ -705,7 +706,8 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
 
     # Read and mangle the file headers
     ordinal_to_symbol_mangler = (
-        _pynativelib_mangle_imports(header, libraries_to_mangle))
+        _pynativelib_mangle_imports(header, sizeof_pointer,
+                                    libraries_to_mangle))
 
     # Pull out the symbol information
     dyld_info = view_dyld_info(header)
@@ -715,8 +717,8 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
         sizeof_pointer=sizeof_pointer, lazy=False))
 
     mangled_count = 0
-
     def mangle_bindings(bindings):
+        nonlocal mangled_count
         for binding in bindings:
             mangler = ordinal_to_symbol_mangler.get(binding.library_ordinal)
             if mangler is not None:
