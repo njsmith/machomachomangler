@@ -45,6 +45,13 @@ class StructType(object):
                                 buf, offset,
                                 *self._values_from_dict(value_dict))
 
+    def view_array(self, buf, offset, count):
+        views = []
+        for _ in range(count):
+            views.append(self.view(buf, offset))
+            offset += self.size
+        return views
+
 def _repr_field(struct_code, value):
     if struct_code in "bBhHiIlLqQnN":
         l = struct.calcsize("<" + struct_code)

@@ -129,14 +129,16 @@ LC_LOAD_UPWARD_DYLIB = 0x23 | LC_REQ_DYLD
 # These are the commands that load dylibs.
 # When a bind opcode refers to "library 2", it means the second command
 # (1-based) load command that falls in this set:
-LOAD_DYLIB_COMMANDS = {LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
-                       LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB}
+LOAD_DYLIB_COMMANDS = {LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB,
+                       LC_LOAD_UPWARD_DYLIB}
 # (it's 1-based because -2 means flat namespace, -1 means main executable, and
 # 0 means within the same file)
 
 LC_SEGMENT_64 = 0x19
 LC_DYLD_INFO = 0x22
 LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
+
+LC_SEGMENT_ANY = {LC_SEGMENT, LC_SEGMENT_64}
 
 # These use the LINKEDIT_DATA_COMMAND struct and contain an offset to a blob
 # of data in the __LINKEDIT segment. Since we're rewriting with the __LINKEDIT
@@ -160,7 +162,6 @@ LC_LINKER_OPTIMIZATION_HINT = 0x2e
 def _command(name, fields):
     return StructType(name,
                       [(uint32_t, "cmd"), (uint32_t, "cmdsize")] + fields)
-
 LOAD_COMMAND = _command("LOAD_COMMAND", [])
 
 LC_ID_TO_STRUCT = {}
@@ -183,6 +184,29 @@ LC_ID_TO_STRUCT[LC_SEGMENT] = SEGMENT_COMMAND
 
 SEGMENT_COMMAND_64 = _command("SEGMENT_COMMAND_64", _segment_fields(uint64_t))
 LC_ID_TO_STRUCT[LC_SEGMENT_64] = SEGMENT_COMMAND_64
+
+def _section_fields(addr_t):
+    return [
+        ("16s", "sectname"),
+        ("16s", "segname"),
+        (addr_t, "addr"),  # vm address
+        (addr_t, "size"),
+        (uint32_t, "offset"),  # file offset
+        (uint32_t, "align"),
+        (uint32_t, "reloff"),
+        (uint32_t, "nreloc"),
+        (uint32_t, "flags"),
+        (uint32_t, "reserved1"),
+        (uint32_t, "reserved2"),
+        *([(uint32_t, "reserved3")] if addr_t is uint64_t else []),
+    ]
+SECTION = StructType("SECTION", _section_fields(uint32_t))
+SECTION_64 = StructType("SECTION_64", _section_fields(uint64_t))
+
+SECTION_TYPE = 0x000000ff
+SECTION_ATTRIBUTES = 0xffffff00
+
+S_ZEROFILL = 0x1
 
 # load command variable length strings are uint32_t, which is the offset from
 # the start of the load command struct
@@ -312,101 +336,3 @@ EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL =                  0x01
 EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION =                    0x04
 EXPORT_SYMBOL_FLAGS_REEXPORT =                           0x08
 EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER =                  0x10
-
-
-# If we do:
-#   xcrun dyldinfo -lazy_info user-dylib.dylib
-# we can see that user-dylib.dylib indeed has a lazy binding to the
-# _mangled_dylib_public_function in mangled-dylib.dylib :-(
-#
-# (Note the need to use "xcrun" to run the super-useful "dyldinfo"
-# utility. Why? beats me.)
-#
-# Empirically it looks like this can be prevented by passing -bind_at_load
-# when linking user-dylib.dylib (i.e. the library whose import symbols need to
-# be mangled). (ld(1) seems to suggest that this just sets a flag, but in fact
-# when I pass this to ld the resulting binary has lazy_bind_size == 0.)
-#
-# Maybe adding these into the regular binding table is enough though?
-
-# zibi:mangle-test njs$ xcrun dyldinfo -lazy_bind user-dylib.dylib.with-lazy
-# lazy binding information (from lazy_bind part of dyld info):
-# segment section          address    index  dylib            symbol
-# __DATA  __la_symbol_ptr  0x00001020 0x0000 flat-namespace   _mangled_dylib_public_function
-# __DATA  __la_symbol_ptr  0x00001028 0x0025 libSystem        _fprintf
-
-# vm address 0x1020 is in __DATA, which starts at 0x1000
-# file offset 4096
-# and has segment __la_symbol_ptr, starting at address 0x1020
-#  = offset 4128 = 0x1020
-#
-# 0x1020 has bytes
-#    08 0f 00 00 00 00 00 00
-# 0x1028 has bytes
-#    24 0f 00 00 00 00 00 00
-#
-# 0x0f08 is in __TEXT, section __stub_helper which starts at 0x0f08
-# 0x0f08 has bytes
-#    68 00 00 00 00 e9 02 00
-#
-# Some info on how this works -- it looks like __stub_helper has a call to
-# dyld_stub_binder
-# https://reverseengineering.stackexchange.com/questions/8163/in-a-mach-o-executable-how-can-i-find-which-function-a-stub-targets
-# which when run will rewrite the data in __la_symbol_ptr
-# so the bind opcode actually says where to put the function pointer once we
-# get it
-
-# and in fact, it looks like -bind_at_load even leaves the __nl_symbol_ptr /
-# __la_symbol_ptr distinction in place, and just puts the lazy symbol binding
-# opcodes in with the regular binding opcodes. So that's OK, we can kill the
-# laziness ourselves. Phew.
-
-# otool -s __TEXT __stub_helper -V says:
-
-# Contents of (__TEXT,__stub_helper) section
-# 0000000000000f08      pushq   $0x0
-# 0000000000000f0d      jmp     0xf14
-# 0000000000000f12      addb    %al, (%rax)
-# 0000000000000f14      leaq    0xed(%rip), %r11
-# 0000000000000f1b      pushq   %r11
-# 0000000000000f1d      jmpq    *0xdd(%rip)
-# 0000000000000f23      nop
-# 0000000000000f24      pushq   $0x25
-# 0000000000000f29      jmp     0xf14
-
-# so it looks like _mangled_dylib_public_function does
-#
-#   pushq $0x0
-#   jmp 0xf14
-#
-# (which pushes 0x0 to the stack
-#
-# and _fprintf does
-#
-#   pushq $0x25
-#   jmp 0xf14
-#
-# and then at 0xf14 we have:
-# 0000000000000f14      leaq    0xed(%rip), %r11
-# 0000000000000f1b      pushq   %r11
-# 0000000000000f1d      jmpq    *0xdd(%rip)
-
-# And those 0x0, 0x25 numbers appear to be the offset into the lazy bind
-# opcode stream where you have to go to get the binding for each item.
-# (this person agrees: https://stackoverflow.com/questions/8825537/mach-o-symbol-stubs-ios/8836580#comment11133246_8836580)
-
-# And they're encoded directly into the assembly instructions:
-# 0000000000000f08      6800000000              pushq   $0x0
-# 0000000000000f24      6825000000              pushq   $0x25
-#
-# (first number is offset, second number is x86-64 binary, notice the
-# immediate inside the bytes.) So in theory I guess we could fix these up by
-# going in and finding the address + 1 of the entry in the __stub_helper
-# section, in practice this seems a litttttttle too fragile.
-
-# we can (and probably should!) leave the lazy stream intact, while copying
-# out the parts we want to mangle.
-
-# Python script to decode bind opcode stream:
-# https://github.com/zneak/fcd/blob/b29b4ac/scripts/macho.py#L307
-# (GPLv3)

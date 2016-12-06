@@ -1,11 +1,30 @@
+import pytest
 from binascii import unhexlify
 
 from ..util import *
+
+def test_zero_bytearray_slice():
+    buf = bytearray(b"-" * 10)
+    zero_bytearray_slice(buf, 2, 5)
+    assert buf == b"--\x00\x00\x00-----"
 
 def test_round_to_next():
     assert round_to_next(10, 12) == 12
     assert round_to_next(20, 12) == 24
     assert round_to_next(24, 12) == 24
+
+def test_pad_inplace():
+    buf = bytearray.fromhex("112233")
+    assert pad_inplace(buf, size=5) == bytearray.fromhex("1122330000")
+    assert buf == bytearray.fromhex("1122330000")
+    pad_inplace(buf, align=4)
+    assert buf == bytearray.fromhex("1122330000000000")
+    with pytest.raises(TypeError):
+        pad_inplace(buf)
+    with pytest.raises(TypeError):
+        pad_inplace(buf, size=10, align=1)
+    with pytest.raises(ValueError):
+        pad_inplace(buf, size=4)
 
 def test_read_asciiz():
     assert read_asciiz(b"abc\x00def", 0) == (b"abc", 4)

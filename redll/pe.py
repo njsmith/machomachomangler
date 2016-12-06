@@ -105,24 +105,15 @@ def view_optional_header(coff_header):
                       .format(optional_header["Magic"]))
     return optional_header
 
-def _view_array(struct_type, buf, offset, count):
-    views = []
-    next_offset = offset
-    for i in range(count):
-        view = struct_type.view(buf, next_offset)
-        views.append(view)
-        next_offset = view.end_offset
-    return views
-
 def view_data_directories(optional_header):
-    return _view_array(DATA_DIRECTORY,
-                       optional_header.buf, optional_header.end_offset,
-                       optional_header["NumberOfRvaAndSizes"])
+    return DATA_DIRECTORY.view_array(
+        optional_header.buf, optional_header.end_offset,
+        optional_header["NumberOfRvaAndSizes"])
 
 def view_sections(coff_header, data_directories):
-    return _view_array(SECTION_TABLE_ENTRY,
-                       coff_header.buf, data_directories[-1].end_offset,
-                       coff_header["NumberOfSections"])
+    return SECTION_TABLE_ENTRY.view_array(
+        coff_header.buf, data_directories[-1].end_offset,
+        coff_header["NumberOfSections"])
 
 PEHeaders = namedtuple("PE_HEADERS",
                        ["coff_header",

@@ -1,9 +1,23 @@
+def zero_bytearray_slice(buf, start, stop):
+    buf[start:stop] = bytes(stop - start)
+
 def round_to_next(size, alignment):
     "Return smallest n such that n % alignment == 0, n >= size"
     if size % alignment == 0:
         return size
     else:
         return alignment * (size // alignment + 1)
+
+def pad_inplace(buf, *, size=None, align=None):
+    if (size is None) == (align is None):
+        raise TypeError("must specify exactly one of size or align")
+    if size is None:
+        size = round_to_next(len(buf), align)
+    if size < len(buf):
+        raise ValueError("new size ({}) is less than current size ({})"
+                         .format(size, len(buf)))
+    buf += bytes(size - len(buf))
+    return buf
 
 def _read_leb128(buf, offset, *, signed):
     value = 0
