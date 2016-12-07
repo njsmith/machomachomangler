@@ -180,6 +180,8 @@ Debian with a mingw-w64 cross-compiler and wine installed::
 
 Some known limitations of the PE dll-import-switcheroo code:
 
+- The command line tool could be less minimalist.
+
 - GNU ``objdump`` has a bug where it can't read the import tables of
   our patched PE files -- it just shows all of the import table until
   it hits the patched entry, and then it stops displaying

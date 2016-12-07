@@ -43,7 +43,8 @@ def test_redll_end_to_end(tmpdir, monkeypatch):
         run_exe(archdir.join("main.exe"), expect_success=False)
 
         # Then we run redll, and it works again
-        subprocess.check_call([sys.executable, "-m", "redll",
+        subprocess.check_call([sys.executable,
+                               "-m", "machomachomangler.cmd.redll",
                                archdir.join("main.exe").strpath,
                                archdir.join("patched-main.exe").strpath,
                                "sample-dll.dll", "renamed-sample-dll.dll"])
