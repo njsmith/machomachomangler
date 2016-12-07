@@ -18,11 +18,14 @@ for arch_name, arches in [
     if not os.path.exists(arch_name):
         os.mkdir(arch_name)
 
+    def outpath(name):
+        return os.path.join(arch_name, name)
+
     def cc(args, out):
-        run(CC + args + ["-o", os.path.join(arch_name, out)])
+        run(CC + args + ["-o", outpath(out)])
 
     cc(["-shared", "native-lib.c"], "native-lib.dylib")
-    cc(["-bundle", "fake-pymodule.c", "./native-lib.dylib"],
+    cc(["-bundle", "fake-pymodule.c", outpath("native-lib.dylib")],
        "fake-pymodule.bundle")
     cc(["main-dlopen.c"], "main-dlopen")
-    cc(["main-envvar.c", "./native-lib.dylib"], "main-envvar")
+    cc(["main-envvar.c", outpath("native-lib.dylib")], "main-envvar")
