@@ -41,7 +41,8 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
             return subtmpdir.join(*args).strpath
 
         if not os.path.exists(inpath("native-lib.dylib")):
-            run([sys.executable, inpath("..", "build.py")])
+            run([sys.executable,
+                 os.path.join(TEST_DIR, "sample_macho", "build.py")])
 
         def mangler(name):
             return b"pynativelib_native_lib_" + name
