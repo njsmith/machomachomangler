@@ -33,6 +33,9 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
     def pathto(name):
         return os.path.join(TEST_DIR, "sample-macho", name)
 
+    if not os.path.exists(pathto("native-lib.dylib")):
+        run([sys.executable, pathto("build.py")])
+
     def mangler(name):
         return b"pynativelib_native_lib_" + name
     libraries_to_mangle = {

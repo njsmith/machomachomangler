@@ -1,4 +1,7 @@
 language: python
+os:
+  - linux
+  - osx
 python:
   - 3.4
   - 3.5
@@ -11,6 +14,7 @@ addons:
       - wine
 
 before_install:
+  - pip install .
   - pip install -r test-requirements.txt
   - pip install codecov
 
