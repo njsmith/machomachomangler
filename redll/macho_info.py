@@ -186,7 +186,7 @@ SEGMENT_COMMAND_64 = _command("SEGMENT_COMMAND_64", _segment_fields(uint64_t))
 LC_ID_TO_STRUCT[LC_SEGMENT_64] = SEGMENT_COMMAND_64
 
 def _section_fields(addr_t):
-    return [
+    fields = [
         ("16s", "sectname"),
         ("16s", "segname"),
         (addr_t, "addr"),  # vm address
@@ -198,8 +198,13 @@ def _section_fields(addr_t):
         (uint32_t, "flags"),
         (uint32_t, "reserved1"),
         (uint32_t, "reserved2"),
-        *([(uint32_t, "reserved3")] if addr_t is uint64_t else []),
     ]
+    if addr_t is uint64_t:
+        fields += [
+            (uint32_t, "reserved3"),
+        ]
+    return fields
+
 SECTION = StructType("SECTION", _section_fields(uint32_t))
 SECTION_64 = StructType("SECTION_64", _section_fields(uint64_t))
 
