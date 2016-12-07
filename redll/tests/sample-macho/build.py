@@ -8,10 +8,21 @@ def run(cmd):
     print(cmd)
     subprocess.check_call(cmd)
 
-CC = ["clang", "-arch", "i386", "-arch", "x86_64"]
+for arch_name, arches in [
+        ("i386", ["-arch", "i386"]),
+        ("x86_64", ["-arch", "x86_64"]),
+        ("fat", ["-arch", "i386", "-arch", "x86_64"]),
+        ]:
+    CC = ["clang"] + arches
 
-run(CC + ["-shared", "native-lib.c", "-o", "native-lib.dylib"])
-run(CC + ["-bundle", "fake-pymodule.c", "./native-lib.dylib",
-          "-o", "fake-pymodule.bundle"])
-run(CC + ["main-dlopen.c", "-o", "main-dlopen"])
-run(CC + ["main-envvar.c", "./native-lib.dylib", "-o", "main-envvar"])
+    if not os.path.exists(arch_name):
+        os.mkdir(arch_name)
+
+    def cc(args, out):
+        run(CC + args + ["-o", os.path.join(arch_name, out)])
+
+    cc(["-shared", "native-lib.c"], "native-lib.dylib")
+    cc(["-bundle", "fake-pymodule.c", "./native-lib.dylib"],
+       "fake-pymodule.bundle")
+    cc(["main-dlopen.c"], "main-dlopen")
+    cc(["main-envvar.c", "./native-lib.dylib"], "main-envvar")
