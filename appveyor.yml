@@ -17,5 +17,5 @@ build_script:
   - "pip install codecov"
 
 test_script:
-  - py.test --cov=redll --cov-config=.coveragerc redll
+  - py.test -ra --cov=redll --cov-config=.coveragerc redll
   - codecov

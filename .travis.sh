@@ -22,6 +22,6 @@ pip install -U pip
 pip install .
 pip install -Ur test-requirements.txt
 
-pytest --cov=redll --cov-config=.coveragerc redll
+pytest -ra --cov=redll --cov-config=.coveragerc redll
 
 pip install codecov && codecov
