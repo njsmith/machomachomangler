@@ -4,10 +4,9 @@ import subprocess
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-def run(*args, **kwargs):
-    print(args[0])
-    kwargs["check"] = True
-    return subprocess.run(*args, **kwargs)
+def run(cmd):
+    print(cmd)
+    subprocess.check_call(cmd)
 
 CC = ["clang", "-arch", "i386", "-arch", "x86_64"]
 

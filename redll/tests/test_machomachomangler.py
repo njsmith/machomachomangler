@@ -26,6 +26,7 @@ def write(path, buf):
         f.write(buf)
 
 def run(cmd):
+    print(cmd)
     subprocess.check_call(cmd)
 
 @need_macos
