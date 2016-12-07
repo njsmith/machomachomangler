@@ -3,7 +3,7 @@ import os.path
 import subprocess
 import shutil
 
-from ..machomachomangler import (
+from ..macho import (
     macho_macho_mapper,
     rewrite_pynativelib_imports, rewrite_pynativelib_exports,
 )

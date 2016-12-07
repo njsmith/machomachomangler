@@ -2,7 +2,7 @@ import sys
 
 # XX FIXME: write a real command line interface
 
-from .pe import redll
+from ..pe import redll
 
 args = sys.argv[1:]
 

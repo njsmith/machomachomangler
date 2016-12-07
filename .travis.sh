@@ -20,8 +20,12 @@ fi
 pip install -U pip
 
 pip install .
+INSTALLDIR=$(python -c "import os, machomachomangler; print(os.path.dirname(machomachomangler.__file__))")
+
 pip install -Ur test-requirements.txt
 
-pytest -ra --cov=redll --cov-config=.coveragerc redll
+mkdir empty
+cd empty
+pytest -ra --cov="$INSTALLDIR" --cov-config=../.coveragerc --pyargs machomachomangler
 
 pip install codecov && codecov

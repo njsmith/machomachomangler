@@ -1,12 +1,12 @@
 from setuptools import setup, find_packages
 
-from redll import __version__
+from machomachomangler import __version__
 
 setup(
-    name="redll",
+    name="machomachomangler",
     version=__version__,
     description=
-        "Tools for mangling PE and Mach-O binaries",
+        "Tools for mangling Mach-O and PE binaries",
     long_description=open("README.rst").read(),
     author="Nathaniel J. Smith",
     author_email="njs@pobox.com",
@@ -15,9 +15,10 @@ setup(
     install_requires=[
         "attrs",
     ],
-    url="https://github.com/njsmith/redll",
-    # This means, just install *everything* you see under redll/, even if it
-    # doesn't look like a source file, so long as it appears in MANIFEST.in:
+    url="https://github.com/njsmith/machomachomangler",
+    # This means, just install *everything* you see under the package
+    # directory, even if it doesn't look like a source file, so long as it
+    # appears in MANIFEST.in:
     include_package_data=True,
     classifiers=[
         "Development Status :: 3 - Alpha",
