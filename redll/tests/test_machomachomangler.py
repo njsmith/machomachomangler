@@ -34,6 +34,7 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
     for subdir in ["i386", "x86_64", "fat"]:
         print("Doing end-to-end tests for {} binaries".format(subdir))
         subtmpdir = tmpdir.join(subdir)
+        subtmpdir.ensure(dir=True)
 
         def inpath(*args):
             return os.path.join(TEST_DIR, "sample-macho", subdir, *args)
