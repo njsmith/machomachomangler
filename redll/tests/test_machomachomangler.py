@@ -26,7 +26,7 @@ def write(path, buf):
         f.write(buf)
 
 def run(cmd):
-    subprocess.run(cmd, check=True)
+    subprocess.check_call(cmd)
 
 @need_macos
 def test_pynativelib_end_to_end(tmpdir, monkeypatch):
