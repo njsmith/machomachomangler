@@ -20,12 +20,12 @@ fi
 pip install -U pip
 
 pip install .
-INSTALLDIR=$(python -c "import os, machomachomangler; print(os.path.dirname(machomachomangler.__file__))")
-
 pip install -Ur test-requirements.txt
 
 mkdir empty
 cd empty
+
+INSTALLDIR=$(python -c "import os, machomachomangler; print(os.path.dirname(machomachomangler.__file__))")
 pytest -ra --cov="$INSTALLDIR" --cov-config=../.coveragerc --pyargs machomachomangler
 
 pip install codecov && codecov
