@@ -9,7 +9,7 @@ if [ "$TRAVIS_OS_NAME" = "osx" ]; then
     # XX will have to update this if we start supporting py2
     PYTHON_EXE=/Library/Frameworks/Python.framework/Versions/*/bin/python3
     sudo $PYTHON_EXE -m pip install virtualenv
-    sudo $PYTHON_EXE -m virtualenv testenv
+    $PYTHON_EXE -m virtualenv testenv
     source testenv/bin/activate
 fi
 
