@@ -1,4 +1,5 @@
 import copy
+import uuid
 import attr
 from .util import (
     round_to_next, pad_inplace, zero_bytearray_slice,
@@ -145,22 +146,17 @@ def available_header_size(header):
     return smallest
 
 
-# fn receives:
-# - old load command
-# - new load command
-# - new load command buf
-# where the new load command buf is a mutable copy of the old load command,
-# and new load command is a view on this copy.
-# The fn should mutate the new buf in place (if it wants to).
-# This code worries about alignment and the cmdsize field, so you don't have
-# to.
+# fn receives old load command, and returns the new load command. The new
+# command should have an accurate cmdsize (so we can figure out where it
+# begins and ends!), but this function will worry about adding any necessary
+# padding.
 def map_load_commands_inplace(header, pointer_size, fn):
     buf = header.buf
     new_lc_bufs = []
     for lc in view_load_commands(header):
-        new_lc_buf = bytearray(lc.buf[_sizeslice(lc.offset, lc["cmdsize"])])
-        new_lc = view_load_command(new_lc_buf, 0)
-        fn(lc, new_lc, new_lc_buf)
+        new_lc = fn(lc)
+        new_lc_buf = bytearray(new_lc.buf[new_lc.offset:new_lc.end_offset])
+        new_lc = LOAD_COMMAND.view(new_lc_buf)
         pad_inplace(new_lc_buf, align=pointer_size)
         new_lc["cmdsize"] = len(new_lc_buf)
         new_lc_bufs.append(new_lc_buf)
@@ -176,6 +172,24 @@ def map_load_commands_inplace(header, pointer_size, fn):
     new_lc_slice = _sizeslice(header.end_offset, len(new_lc_buf_joined))
     buf[new_lc_slice] = new_lc_buf_joined
     header["sizeofcmds"] = len(new_lc_buf_joined)
+
+
+# Returns a new dylib_command object that is a view onto a new buffer
+# containing just that command object, i.e., the returned object always has
+#   lc.offset == 0
+#   lc.end_offset == len(lc.buf)
+# And the new lc is identical to the input one, except that the dylib_name has
+# been changed.
+def dylib_command_with_new_name(old_command, new_name):
+    assert old_command.struct_type is DYLIB_COMMAND
+    new_buf = old_command.buf[old_command.offset:old_command.end_offset]
+    new_dc = DYLIB_COMMAND.view(new_buf, 0)
+    # Almost certainly redundant, but just in case
+    new_dc["dylib_name"] = len(new_buf)
+    new_buf += new_name
+    new_buf += b"\x00"
+    new_dc["cmdsize"] = len(new_buf)
+    return new_dc
 
 
 def replace_linkedit_chunk(buf, old_offset, old_size, new_chunk):
@@ -497,11 +511,25 @@ class Export:
     # for everything else
     address = attr.ib(default=None)
 
+def print_exports(buf):
+    header, pointer_size = view_mach_header(buf)
+    dyld_info = view_dyld_info(header)
+    exports = decode_export_trie(buf, dyld_info["export_off"])
+    for export in exports:
+        print(export)
+
 def decode_export_trie(buf, start):
     def decode_node(prefix, p):
         terminal_size, p = read_uleb128(buf, p)
+        expected_p = p + terminal_size
         if terminal_size:
             flags, p = read_uleb128(buf, p)
+            # AFAICT having both of these flags set is not entirely ruled out,
+            # but I'm not sure about what it would mean. (I am pretty sure we
+            # handle it correctly if it happens -- the code in dyld all seems
+            # to do if REEXPORT: ... else if STUB_AND_RESOLVER: ...)
+            assert not (flags & EXPORT_SYMBOL_FLAGS_REEXPORT
+                        and flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER)
             if flags & EXPORT_SYMBOL_FLAGS_REEXPORT:
                 library_ordinal, p = read_uleb128(buf, p)
                 imported_name, p = read_asciiz(buf, p)
@@ -518,6 +546,7 @@ def decode_export_trie(buf, start):
             else:
                 address, p = read_uleb128(buf, p)
                 yield Export(symbol_name=prefix, flags=flags, address=address)
+        assert expected_p == p
         branches = buf[p]
         p += 1
         for _ in range(branches):
@@ -525,7 +554,7 @@ def decode_export_trie(buf, start):
             child_offset, p = read_uleb128(buf, p)
             yield from decode_node(prefix + child_prefix, start + child_offset)
 
-    return decode_node(b"", start)
+    return list(decode_node(b"", start))
 
 # The export trie format has a very odd design choice, which is that it
 # combines the following features:
@@ -592,6 +621,12 @@ def _trieify(deep_node):
         e = deep_node.export
         terminal_buf = bytearray()
         terminal_buf += write_uleb128(e.flags)
+        # AFAICT having both of these flags set is not entirely ruled out, but
+        # I'm not sure about what it would mean. (I am pretty sure we handle
+        # it correctly if it happens -- the code in dyld all seems to do if
+        # REEXPORT: ... else if STUB_AND_RESOLVER: ...)
+        assert not (e.flags & EXPORT_SYMBOL_FLAGS_REEXPORT
+                    and e.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER)
         if e.flags & EXPORT_SYMBOL_FLAGS_REEXPORT:
             terminal_buf += write_uleb128(e.library_ordinal)
             if e.imported_name != e.symbol_name:
@@ -658,9 +693,9 @@ def _roundtrip_smoketest(buf):
     header, sizeof_pointer = view_mach_header(buf)
     dyld_info = view_dyld_info(header)
 
-    exports = list(decode_export_trie(buf, dyld_info["export_off"]))
+    exports = decode_export_trie(buf, dyld_info["export_off"])
     reencoded = encode_export_trie(exports)
-    exports2 = list(decode_export_trie(reencoded, 0))
+    exports2 = decode_export_trie(reencoded, 0)
     assert sorted(exports) == sorted(exports2)
 
     bind = list(decode_bind_table(
@@ -689,22 +724,23 @@ def _pynativelib_mangle_import_libs(header, sizeof_pointer, libraries_to_mangle)
     library_ordinal_count = itertools.count(1)
     ordinal_to_mangler = {}
 
-    def mapper(old_lc, new_lc, new_lc_buf):
-        if new_lc["cmd"] not in LOAD_DYLIB_COMMANDS:
-            return
+    def mapper(old_lc):
+        if old_lc["cmd"] not in LOAD_DYLIB_COMMANDS:
+            return old_lc
         library_ordinal = next(library_ordinal_count)
         name, _ = read_asciiz(lc.buf, lc.offset + lc["dylib_name"])
         basename = name.rsplit(b"/", 1)[-1]
         if basename not in libraries_to_mangle:
-            return
+            return old_lc
         # Okay, we've found a target library, let's do this.
-        # Remember the ordinal for later.
+        new_name, symbol_mangler = libraries_to_mangle[basename]
+        # Remember the ordinal and symbol mangler for later.
         ordinal_to_mangler[library_ordinal] = symbol_mangler
+        # Make the new load command
+        new_lc = dylib_command_with_new_name(old_lc, new_name)
         # Make the import weak
         new_lc["cmd"] = LC_LOAD_WEAK_DYLIB
-        # And change the name
-        new_lc["dylib_name"] = new_lc.size
-        new_lc_buf[new_lc.size:] = new_name + b"\x00"
+        return new_lc
 
     map_load_commands_inplace(header, sizeof_pointer, mapper)
 
@@ -791,15 +827,15 @@ def rewrite_pynativelib_exports(buf, new_lib_id, symbol_mangler):
 
     header, sizeof_pointer = view_mach_header(buf)
     # Rewrite the library id (like install_name_tool -id):
-    def mapper(old_lc, new_lc, new_lc_buf):
-        if old_lc["cmd"] != LC_ID_DYLIB:
-            return
-        new_lc["dylib_name"] = new_lc.size
-        new_lc_buf[new_lc.size:] = new_lib_id + b"\x00"
+    def mapper(old_lc):
+        if old_lc["cmd"] == LC_ID_DYLIB:
+            return dylib_command_with_new_name(old_lc, new_lib_id)
+        else:
+            return old_lc
     map_load_commands_inplace(header, sizeof_pointer, mapper)
 
     dyld_info = view_dyld_info(header)
-    exports = list(decode_export_trie(buf, dyld_info["export_off"]))
+    exports = decode_export_trie(buf, dyld_info["export_off"])
 
     for export in exports:
         export.symbol_name = symbol_mangler(export.symbol_name)
@@ -813,5 +849,151 @@ def rewrite_pynativelib_exports(buf, new_lib_id, symbol_mangler):
     dyld_info["export_size"] = len(new_export_buf)
 
     _roundtrip_smoketest(buf)
+
+    return buf
+
+
+################################################################
+# Pynativelib re-exporter writer
+################################################################
+
+# Given a dylib and a new_id/mangling rule, create a new dylib that imports
+# the dylib that rewrite_pynativelib_exports made, and re-exports everything
+# under its original name.
+def make_pynativelib_export_reexporter(
+        old_buf, imported_lib_id, symbol_mangler, new_lib_id):
+    _roundtrip_smoketest(old_buf)
+
+    old_header, pointer_size = view_mach_header(old_buf)
+
+    new_buf = bytearray()
+    new_buf += old_buf[:old_header.end_offset]
+    new_header = view_mach_header(new_buf)
+
+    # load commands:
+    # __TEXT segment with no sections, to cover the load header/load command
+    # __LINKEDIT segment with no sections, for the DYLD_INFO
+    # LC_LOAD_DYLIB to import the thing
+    # LC_ID_DYLIB to name our new library
+    #   these both should copy all non-name fields from the original id struct
+    # LC_UUID I guess?
+    # version-related commands copied from original
+    # LC_DYLD_INFO_ONLY (with export table only)
+
+    if pointer_size == 4:
+        segment_lc = LC_SEGMENT
+        segment_command = SEGMENT_COMMAND
+    else:
+        segment_lc = LC_SEGMENT_64
+        segment_command = SEGMENT_COMMAND_64
+
+    # These load commands should each be the same size as their underlying
+    # buffer (so you don't have to worry about setting cmdsize)
+    load_commands = []
+
+    __TEXT = segment_command.new()
+    __TEXT["cmd"] = segment_lc
+    __TEXT["segname"] = b"__TEXT"
+    __TEXT["vmaddr"] = 0
+    # vmsize to be set later
+    __TEXT["fileoff"] = 0
+    # filesize to be set later
+    # magic values copied from a random ld-generated dylib
+    __TEXT["maxprot"] = 0x7
+    __TEXT["initprot"] = 0x5
+    __TEXT["nsects"] = 0
+    __TEXT["flags"] = 0
+    load_commands.append(__TEXT)
+    # make sure we don't accidentally use this later
+    del __TEXT
+
+    __LINKEDIT = segment_command.new()
+    __LINKEDIT["cmd"] = segment_lc
+    __LINKEDIT["segname"] = b"__LINKEDIT"
+    # vmaddr to be set later
+    # vmsize to be set later
+    # fileoff to be set later
+    # filesize to be set later
+    # magic values copied from a random ld-generated dylib
+    __LINKEDIT["maxprot"] = 0x7
+    __LINKEDIT["initprot"] = 0x1
+    __LINKEDIT["nsects"] = 0
+    __LINKEDIT["flags"] = 0
+    load_commands.append(__LINKEDIT)
+
+    for orig_id_lc in view_load_commands(old_header, [LC_ID_DYLIB]):  # pragma: no branch
+        new_import_lc = dylib_command_with_new_name(orig_id_lc, new_import_id)
+        new_import_lc["cmd"] = LC_LOAD_DYLIB
+        load_commands.append(new_import)
+        new_id_lc = dylib_command_with_new_name(orig_id_lc, new_lib_id)
+        load_commands.append(new_id_lc)
+
+    version_lcs = {LC_VERSION_MIN_MACOSX, LC_VERSION_MIN_IPHONEOS,
+                   LC_VERSION_MIN_WATCHOS, LC_SOURCE_VERSION}
+    for orig_lc in view_load_commands(old_header, version_lcs):
+        # ld refuses to let us use -reexported_symbols_list unless we specify
+        # -macosx_version_min 10.7, so we'll use that as our minimal version
+        # here too.
+        lc = orig_lc.copy()
+        if lc["cmd"] == LC_VERSION_MIN_MACOSX:
+            # "X.Y.Z is encoded in nibbles xxxx.yy.zz" -- loader.h
+            lc["version"] = max((10 << 16) | (7 << 8), lc["version"])
+        load_commands.append(orig_lc.copy())
+
+    uuid_lc = UUID_COMMAND.new()
+    uuid_lc["cmd"] = LC_UUID
+    uuid_lc["uuid"] = uuid.uuid4().bytes
+    load_commands.append(uuid_lc)
+
+    dyld_lc = DYLD_INFO_COMMAND.new()
+    dyld_lc["cmd"] = LC_DYLD_INFO_ONLY
+    # all fields default to zero
+    # we'll fill in export_off and export_size later
+    load_commands.append(dyld_lc)
+    # make sure we don't accidentally use this later
+    del dyld_lc
+
+    for lc in load_commands:
+        assert lc.offset == 0
+        pad_inplace(lc.buf, align=pointer_size)
+        lc["cmdsize"] = len(lc.buf)
+        new_header["cmdsize"] += len(lc.buf)
+        new_buf += lc.buf
+
+    pad_inplace(new_buf, align=4096)
+    for lc in view_load_commands(new_header, LC_SEGMENT_ANY):
+        if lc["segname"].strip(b"\x00") == b"__TEXT":
+            lc["vmsize"] = lc["filesize"] = len(new_buf)
+        if lc["segname"].strip(b"\x00") == b"__LINKEDIT":
+            lc["vmaddr"] = lc["fileoff"] = len(new_buf)
+
+    old_dyld_info = view_dyld_info(old_header)
+    exports = decode_export_trie(old_buf, old_dyld_info["export_off"])
+    for export in exports:
+        # I'm not 100% sure if this is correct -- maybe we should just be
+        # using = instead of |=? AFAICT when REEXPORT is set then dyld ignores
+        # everything else, so it may not matter either way.
+        # ld -reexported_symbols_list does preserve the WEAK_DEFINITION flag,
+        # at least.
+        export.flags |= EXPORT_SYMBOL_FLAGS_REEXPORT
+        # We can't do the shallow namespace trick and use ordinal -1 here;
+        # dyld requires reexport ordinals to be > 0. (See
+        # findShallowExportedSymbol.) That's fine, we can use a real import.
+        export.library_ordinal = 1
+        export.imported_name = symbol_mangler(export.symbol_name)
+        export.address = None
+    new_export_buf = encode_export_trie(exports)
+
+    new_export_off = replace_linkedit_chunk(new_buf, 0, 0, new_export_buf)
+    new_dyld_info = view_dyld_info(new_header)
+    new_dyld_info["export_off"] = new_export_off
+    new_dyld_info["export_size"] = len(new_export_buf)
+    # ld-generated files don't seem to pad __LINKEDIT to a page size multiple
+    # so we won't either.
+    for lc in view_load_commands(new_header, LC_SEGMENT_ANY):
+        if lc["segname"].strip(b"\x00") == b"__LINKEDIT":
+            lc["vmsize"] = lc["filesize"] = len(new_export_off)
+
+    _roundtrip_smoketest(new_buf)
 
     return buf

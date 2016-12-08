@@ -2,10 +2,12 @@ import sys
 import os.path
 import subprocess
 import shutil
+import ctypes
 
 from ..macho import (
     macho_macho_mapper,
     rewrite_pynativelib_imports, rewrite_pynativelib_exports,
+    make_pynativelib_export_reexporter,
 )
 
 import pytest
@@ -56,9 +58,18 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
         buf = macho_macho_mapper(
             lambda b:
               rewrite_pynativelib_exports(
-                b, b"mangled-native-dylib.dylib", mangler),
+                  b, b"mangled-native-dylib.dylib", mangler),
             read(inpath("native-lib.dylib")))
         write(outpath("mangled-native-lib.dylib"), buf)
+
+        buf = macho_macho_mapper(
+            lambda b:
+              make_pynativelib_export_reexporter(
+                  b,
+                  b"@loader_path/mangled-native-dylib.dylib", mangler,
+                  b"placeholder-for-native-dylib.dylib"),
+            read(inpath("native-lib.dylib")))
+        write(outpath("placeholder-for-native-lib.dylib"), buf)
 
         buf = macho_macho_mapper(
             lambda b: rewrite_pynativelib_imports(b, libraries_to_mangle),
@@ -90,3 +101,10 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
                 run(["arch", arch,
                      "-e", "DYLD_LIBRARY_PATH=" + subtmpdir.strpath,
                      outpath("mangled-main-envvar")])
+
+                print("ctypes on placeholder lib")
+                lib = ctypes.CDLL(outpath("placeholder-for-native-lib.dylib"))
+                native_int = ctypes.c_int.in_dll(lib, "native_int")
+                assert native_int == 13
+                lib.native_func.restype = ctypes.c_int
+                assert lib.native_func() == 14

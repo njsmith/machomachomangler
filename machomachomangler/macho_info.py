@@ -123,8 +123,16 @@ LC_DYSYMTAB = 0xb
 LC_LOAD_DYLIB = 0xc
 LC_ID_DYLIB = 0xd
 LC_LOAD_WEAK_DYLIB = 0x18 | LC_REQ_DYLD
+LC_SEGMENT_64 = 0x19
+LC_UUID = 0x1b
 LC_REEXPORT_DYLIB = 0x1f | LC_REQ_DYLD
+LC_DYLD_INFO = 0x22
+LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
 LC_LOAD_UPWARD_DYLIB = 0x23 | LC_REQ_DYLD
+LC_VERSION_MIN_MACOSX = 0x24
+LC_VERSION_MIN_IPHONEOS = 0x25
+LC_SOURCE_VERSION = 0x2A
+LC_VERSION_MIN_WATCHOS = 0x30
 
 # These are the commands that load dylibs.
 # When a bind opcode refers to "library 2", it means the second command
@@ -133,10 +141,6 @@ LOAD_DYLIB_COMMANDS = {LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB,
                        LC_LOAD_UPWARD_DYLIB}
 # (it's 1-based because -2 means flat namespace, -1 means main executable, and
 # 0 means within the same file)
-
-LC_SEGMENT_64 = 0x19
-LC_DYLD_INFO = 0x22
-LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
 
 LC_SEGMENT_ANY = {LC_SEGMENT, LC_SEGMENT_64}
 
@@ -281,6 +285,21 @@ DYSYMTAB_COMMAND = _command(
     ])
 LC_ID_TO_STRUCT[LC_DYSYMTAB] = DYSYMTAB_COMMAND
 
+UUID_COMMAND = _command(
+    "UUID_COMMAND", [
+        ("16s", "uuid"),
+    ])
+LC_ID_TO_STRUCT[LC_UUID] = UUID_COMMAND
+
+VERSION_MIN_COMMAND = _command(
+    "VERSION_MIN_COMMAND", [
+        (uint32_t, "version"),
+        (uint32_t, "sdk"),
+    ])
+LC_ID_TO_STRUCT[LC_VERSION_MIN_MACOSX] = VERSION_MIN_COMMAND
+LC_ID_TO_STRUCT[LC_VERSION_MIN_IPHONEOS] = VERSION_MIN_COMMAND
+LC_ID_TO_STRUCT[LC_VERSION_MIN_WATCHOS] = VERSION_MIN_COMMAND
+
 # LC_DYLD_INFO, LC_DYLD_INFO_ONLY
 DYLD_INFO_COMMAND = _command(
     "DYLD_INFO_COMMAND", [
@@ -338,6 +357,8 @@ BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB =           0xC0
 EXPORT_SYMBOL_FLAGS_KIND_MASK =                          0x03
 EXPORT_SYMBOL_FLAGS_KIND_REGULAR =                       0x00
 EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL =                  0x01
+# Defined in src/ImageLoaderMachOCompressed.cpp, not loader.h:
+EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE =                      0x02
 EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION =                    0x04
 EXPORT_SYMBOL_FLAGS_REEXPORT =                           0x08
 EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER =                  0x10

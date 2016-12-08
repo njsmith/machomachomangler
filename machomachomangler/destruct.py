@@ -52,6 +52,9 @@ class StructType(object):
             offset += self.size
         return views
 
+    def new(self):
+        return self.view(bytearray(self.size), 0)
+
 def _repr_field(struct_code, value):
     if struct_code in "bBhHiIlLqQnN":
         l = struct.calcsize("<" + struct_code)
@@ -65,21 +68,21 @@ def _repr_field(struct_code, value):
 
 class StructView(MutableMapping):
     def __init__(self, struct_type, buf, offset):
-        self._struct_type = struct_type
+        self.struct_type = struct_type
         self.buf = buf
         self.offset = offset
 
     def __repr__(self):
         s = "<{} of <{}>[{:#x}:]\n".format(
-            self._struct_type._name, self.buf.__class__.__name__, self.offset)
+            self.struct_type._name, self.buf.__class__.__name__, self.offset)
         d = dict(self)
-        for type_, name in self._struct_type._fields:
+        for type_, name in self.struct_type._fields:
             s += "  {:>30}: {}\n".format(name, _repr_field(type_, d[name]))
         s += ">"
         return s
 
     def _value_dict(self):
-        return self._struct_type._unpack_from(self.buf, self.offset)
+        return self.struct_type._unpack_from(self.buf, self.offset)
 
     def __getitem__(self, k):
         return self._value_dict()[k]
@@ -87,31 +90,31 @@ class StructView(MutableMapping):
     def __setitem__(self, k, v):
         value_dict = self._value_dict()
         value_dict[k] = v
-        self._struct_type._pack_into(self.buf, self.offset, value_dict)
+        self.struct_type._pack_into(self.buf, self.offset, value_dict)
 
     def __delitem__(self, k):
         raise NotImplementedError(
             "can't delete fields from fixed-length struct")
 
     def __len__(self):
-        return len(self._struct_type._names)
+        return len(self.struct_type._names)
 
     def __iter__(self):
-        return iter(self._struct_type._names)
+        return iter(self.struct_type._names)
 
     def cast(self, new_type):
         return new_type.view(self.buf, self.offset)
 
-    # def copy(self):
-    #     # Make a copy of the underlying buffer span and return a view onto it
-    #     copy_buf = self.buf[self.offset:self.end_offset]
-    #     if not isinstance(copy_buf, bytearray):
-    #         copy_buf = bytearray(copy_buf)
-    #     return self._struct_type.view(copy_buf, 0)
+    def copy(self):
+        # Make a copy of the underlying buffer span and return a view onto it
+        copy_buf = self.buf[self.offset:self.end_offset]
+        if not isinstance(copy_buf, bytearray):
+            copy_buf = bytearray(copy_buf)
+        return self.struct_type.view(copy_buf, 0)
 
     @property
     def size(self):
-        return self._struct_type.size
+        return self.struct_type.size
 
     @property
     def end_offset(self):
