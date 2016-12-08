@@ -54,7 +54,9 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
         }
 
         buf = macho_macho_mapper(
-            lambda b: rewrite_pynativelib_exports(b, mangler),
+            lambda b:
+              rewrite_pynativelib_exports(
+                b, b"mangled-native-dylib.dylib", mangler),
             read(inpath("native-lib.dylib")))
         write(outpath("mangled-native-lib.dylib"), buf)
 

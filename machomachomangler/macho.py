@@ -644,54 +644,68 @@ def _roundtrip_smoketest(buf):
 # Pynativelib imports rewriter
 ################################################################
 
-def _pynativelib_mangle_imports(header, sizeof_pointer, libraries_to_mangle):
+# fn receives:
+# - old load command
+# - new load command
+# - new load command buf
+# where the new load command buf is a mutable copy of the old load command,
+# and new load command is a view on this copy.
+# The fn should mutate the new buf in place (if it wants to).
+# This code worries about alignment and the cmdsize field, so you don't have
+# to.
+def _map_load_commands_inplace(header, pointer_size, fn):
+    buf = header.buf
+    new_lc_bufs = []
+    for lc in view_load_commands(header):
+        new_lc_buf = bytearray(lc.buf[_sizeslice(lc.offset, lc["cmdsize"])])
+        new_lc = view_load_command(new_lc_buf, 0)
+        fn(lc, new_lc, new_lc_buf)
+        pad_inplace(new_lc_buf, align=pointer_size)
+        new_lc["cmdsize"] = len(new_lc_buf)
+        new_lc_bufs.append(new_lc_buf)
+    new_lc_buf_joined = b"".join(new_lc_bufs)
+    header_space = available_header_size(header)
+    lc_space = header_space - header.end_offset
+    if len(new_lc_buf_joined) > lc_space:
+        raise ValueError(
+            "Not enough space to rewrite Mach-O header: "
+            "need {}, but only {} available. Relink using -headerpad"
+            .format(len(new_header_buf), space_avail))
+    pad_inplace(new_lc_buf_joined, size=lc_space)
+    new_lc_slice = _sizeslice(header.end_offset, len(new_lc_buf_joined))
+    buf[new_lc_slice] = new_lc_buf_joined
+    header["sizeofcmds"] = len(new_lc_buf_joined)
+
+def _pynativelib_mangle_import_libs(header, sizeof_pointer, libraries_to_mangle):
     # buf must be a bytearray, which we modify in place
     # this rewrites the load command table, so if you have a load command view
     # then calling this function will invalidate it.
     # Returns a mapping {ordinal: symbol mangler}
 
-    buf = header.buf
     # Libraries are assigned ordinal values in the order they appear in the
     # load commands, starting with 1. (This is how they're referred to later
     # in the import bindings table.)
-    library_ordinal = 0
-    mangled_libraries = set()
+    library_ordinal_count = itertools.count(1)
     ordinal_to_mangler = {}
-    new_header_buf = buf[:header.end_offset + header["sizeofcmds"]]
-    for lc in view_load_commands(header, LOAD_DYLIB_COMMANDS):
-        library_ordinal += 1
+
+    def mapper(old_lc, new_lc, new_lc_buf):
+        if new_lc["cmd"] not in LOAD_DYLIB_COMMANDS:
+            return
+        library_ordinal = next(library_ordinal_count)
         name, _ = read_asciiz(lc.buf, lc.offset + lc["dylib_name"])
         basename = name.rsplit(b"/", 1)[-1]
-        if basename in libraries_to_mangle:
-            new_name, symbol_mangler = libraries_to_mangle[basename]
-            print("Replacing import of {}\n  with weak import of {}"
-                  .format(name, new_name))
+        if basename not in libraries_to_mangle:
+            return
+        # Okay, we've found a target library, let's do this.
+        # Remember the ordinal for later.
+        ordinal_to_mangler[library_ordinal] = symbol_mangler
+        # Make the import weak
+        new_lc["cmd"] = LC_LOAD_WEAK_DYLIB
+        # And change the name
+        new_lc["dylib_name"] = new_lc.size
+        new_lc_buf[new_lc.size:] = new_name + b"\x00"
 
-            # Remember the ordinal for later
-            ordinal_to_mangler[library_ordinal] = symbol_mangler
-
-            # Make a new load command from scratch
-            new_lc_buf = bytearray(lc.size)
-            new_lc = DYLIB_COMMAND.view(new_lc_buf, 0)
-            new_lc.update(lc)
-            new_lc["cmd"] = LC_LOAD_WEAK_DYLIB
-            new_lc["dylib_name"] = len(new_lc_buf)
-            new_lc_buf += new_name + b"\x00"
-            pad_inplace(new_lc_buf, align=sizeof_pointer)
-            new_lc["cmdsize"] = len(new_lc_buf)
-            # And use the new one.
-            # This slice assignment is quadratic but whatever.
-            new_header_buf[_sizeslice(lc.offset, lc["cmdsize"])] = new_lc_buf
-
-    space_avail = available_header_size(header)
-    if len(new_header_buf) > space_avail:
-        raise ValueError(
-            "Not enough space to rewrite Mach-O header: "
-            "need {}, but only {} available. Relink using -headerpad"
-            .format(len(new_header_buf), space_avail))
-    zero_bytearray_slice(buf, header.end_offset, space_avail)
-    buf[:len(new_header_buf)] = new_header_buf
-    header["sizeofcmds"] = len(new_header_buf) - header.offset
+    _map_load_commands_inplace(header, sizeof_pointer, mapper)
 
     return ordinal_to_mangler
 
@@ -706,8 +720,8 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
 
     # Read and mangle the file headers
     ordinal_to_symbol_mangler = (
-        _pynativelib_mangle_imports(header, sizeof_pointer,
-                                    libraries_to_mangle))
+        _pynativelib_mangle_import_libs(header, sizeof_pointer,
+                                        libraries_to_mangle))
 
     # Pull out the symbol information
     dyld_info = view_dyld_info(header)
@@ -756,71 +770,33 @@ def rewrite_pynativelib_imports(buf, libraries_to_mangle):
     dyld_info["bind_off"] = new_bind_offset
     dyld_info["bind_size"] = len(new_bind_buf)
 
+    _roundtrip_smoketest(buf)
+
     print("Mangled + flattened {} imports (and eagerified {})"
           .format(mangled_count, len(eagerified)))
 
     return buf
-
-    # XX do something with weak binds I guess?
-    # it looks like maybe how weak binds work is that first you bind them
-    #   regularly, to a particular library
-    # and then they show up again in the weak binding section without a
-    #   library associated with them
-    #   and if a new library comes along that also exports that name, then
-    #   dyld goes through and finds *all* the places that import that name (no
-    #   matter where they imported it from) and binds them to the new place?
-    #   (making some guesses based on the comments in mach-o/archive.h)
-    # so possibly what we should be doing is that if a symbol is in the weak
-    #   imports table, we shouldn't mangle it
-    # and similarly on exports, if it's flagged as weak (0x04 maybe? I used
-    #   dyldinfo to look at the export trie for libc++ at some symbols that I
-    #   know show up in the weak import table for other libraries, imported
-    #   from libc++, and in libc++'s export trie they have some sort of "weak"
-    #   flag that dyldinfo can see)
-
-    # but if you do want to override one of these then maybe you export it as
-    # a *non* weak symbol? so can we even tell that that's the goal if just
-    # looking at the exporting dylib?
-
-    # https://en.wikipedia.org/wiki/Weak_symbol
-
-    # also need to think about classic symbol tables
-    # should check dyld to see if it even looks at them
-    #
-    # it looks like dladdr uses the classic symbol table... so, uh... there's
-    # that. I guess I don't care very much if dladdr gives somewhat wrong
-    # results.
-    #
-    # there's also something involving "doBindLazySymbol":
-    # // A program built targeting 10.5 will have hybrid stubs.  When used with weak symbols
-    # // the classic lazy loader is used even when running on 10.6
-    # this appears to be called from stub_binding_helper.s
-    # I don't know if this is still a thing, though -- new binaries seem to
-    # use dyld_stub_binder (which definitely uses the new tables), not
-    # stub_binding_helper
-    # and it shouldn't come up anyway if we're doing all our loading eagerly
-    #
-    # so tentatively I'm guessing we can get away without this
-    #
-    # ImageLoaderMachOCompressed implements setSymbolTableInfo as... throwing
-    # it away. and ...Compressed is used for all files that have DYLD_INFO. so
-    # it's really only those two functions that use it.
-    #
-    # I still don't know why strip refused to remove it though... that
-    # indirect symbols thing? what's that about?
 
 
 ################################################################
 # Pynativelib exports rewriter
 ################################################################
 
-def rewrite_pynativelib_exports(buf, symbol_mangler):
+def rewrite_pynativelib_exports(buf, new_lib_id, symbol_mangler):
     _roundtrip_smoketest(buf)
 
     # Make a mutable copy to work on
     buf = bytearray(buf)
 
     header, sizeof_pointer = view_mach_header(buf)
+    # Rewrite the library id (like install_name_tool -id):
+    def mapper(old_lc, new_lc, new_lc_buf):
+        if old_lc["cmd"] != LC_ID_DYLIB:
+            return
+        new_lc["dylib_name"] = new_lc.size
+        new_lc_buf[new_lc.size:] = new_lib_id + b"\x00"
+    _map_load_commands_inplace(header, sizeof_pointer, mapper)
+
     dyld_info = view_dyld_info(header)
     exports = list(decode_export_trie(buf, dyld_info["export_off"]))
 
@@ -834,5 +810,7 @@ def rewrite_pynativelib_exports(buf, symbol_mangler):
 
     dyld_info["export_off"] = new_export_offset
     dyld_info["export_size"] = len(new_export_buf)
+
+    _roundtrip_smoketest(buf)
 
     return buf

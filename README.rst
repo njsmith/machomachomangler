@@ -30,10 +30,12 @@ to support `the pynativelib proposal
 to allow native libraries to be distributed as standalone `wheel files
 <https://pypi.python.org/pypi/wheel>`__. Specifically this includes:
 
-* For pynativelib libraries: a tool that takes a dylib, and a
-  mangling rule, and applies the mangling rule to all the exported
+* For pynativelib libraries: a tool that takes a dylib, and a mangling
+  rule, and applies the mangling rule to all the exported
   symbols. E.g., it can convert a library that exports ``SSL_new``
-  into one that exports ``pynativelib_openssl__SSL_new``.
+  into one that exports ``pynativelib_openssl__SSL_new``. It also
+  changes the library id while it's at it, e.g. from ``ssl.dylib`` ->
+  ``pynativelib_openssl__ssl.dylib`` (like ``install_name_tool -id``)
 
 * For code that wants to use a pynativelib library: a tool that
   takes a dylib/bundle/executable, a list of "original" dylibs, and
