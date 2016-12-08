@@ -58,7 +58,7 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
         buf = macho_macho_mapper(
             lambda b:
               rewrite_pynativelib_exports(
-                  b, b"mangled-native-dylib.dylib", mangler),
+                  b, b"mangled-native-lib.dylib", mangler),
             read(inpath("native-lib.dylib")))
         write(outpath("mangled-native-lib.dylib"), buf)
 
@@ -66,8 +66,8 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
             lambda b:
               make_pynativelib_export_reexporter(
                   b,
-                  b"@loader_path/mangled-native-dylib.dylib", mangler,
-                  b"placeholder-for-native-dylib.dylib"),
+                  b"@loader_path/mangled-native-lib.dylib", mangler,
+                  b"placeholder-for-native-lib.dylib"),
             read(inpath("native-lib.dylib")))
         write(outpath("placeholder-for-native-lib.dylib"), buf)
 
@@ -84,27 +84,33 @@ def test_pynativelib_end_to_end(tmpdir, monkeypatch):
         write(outpath("mangled-main-envvar"), buf)
         os.chmod(outpath("mangled-main-envvar"), 0o700)
 
-        arches_to_run = {
-            "i386": ["-32"],
-            "x86_64": ["-64"],
-            "fat": ["-32", "-64"],
+        bits_to_test = {
+            "i386": [32],
+            "x86_64": [64],
+            "fat": [32, 64],
         }
 
         with subtmpdir.as_cwd():
-            for arch in arches_to_run[subdir]:
-                print("Running tests with 'arch {}'".format(arch))
+            for bits in bits_to_test[subdir]:
+                print()
+                print("Running {}-bit tests in {} subdir".format(bits, subdir))
+
+                arch_flag = "-{}".format(bits)
 
                 print("main-dlopen")
-                run(["arch", arch, outpath("main-dlopen")])
+                run(["arch", arch_flag, outpath("main-dlopen")])
 
                 print("mangled-main-envvar")
-                run(["arch", arch,
+                run(["arch", arch_flag,
                      "-e", "DYLD_LIBRARY_PATH=" + subtmpdir.strpath,
                      outpath("mangled-main-envvar")])
 
-                print("ctypes on placeholder lib")
-                lib = ctypes.CDLL(outpath("placeholder-for-native-lib.dylib"))
-                native_int = ctypes.c_int.in_dll(lib, "native_int")
-                assert native_int == 13
-                lib.native_func.restype = ctypes.c_int
-                assert lib.native_func() == 14
+                python_bits = 8 * ctypes.sizeof(ctypes.c_void_p)
+                print("python_bits =", python_bits)
+                if bits == python_bits:
+                    print("ctypes on placeholder lib")
+                    lib = ctypes.CDLL(outpath("placeholder-for-native-lib.dylib"))
+                    native_int = ctypes.c_int.in_dll(lib, "native_int")
+                    assert native_int.value == 13
+                    lib.native_func.restype = ctypes.c_int
+                    assert lib.native_func() == 14

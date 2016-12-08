@@ -1,5 +1,6 @@
 import copy
 import uuid
+import itertools
 import attr
 from .util import (
     round_to_next, pad_inplace, zero_bytearray_slice,
@@ -155,9 +156,11 @@ def map_load_commands_inplace(header, pointer_size, fn):
     new_lc_bufs = []
     for lc in view_load_commands(header):
         new_lc = fn(lc)
-        new_lc_buf = bytearray(new_lc.buf[new_lc.offset:new_lc.end_offset])
-        new_lc = LOAD_COMMAND.view(new_lc_buf)
+        new_lc_buf = new_lc.buf[_sizeslice(new_lc.offset, new_lc["cmdsize"])]
+        if not isinstance(new_lc_buf, bytearray):
+            new_lc_buf = bytearray(new_lc_buf)
         pad_inplace(new_lc_buf, align=pointer_size)
+        new_lc = LOAD_COMMAND.view(new_lc_buf, 0)
         new_lc["cmdsize"] = len(new_lc_buf)
         new_lc_bufs.append(new_lc_buf)
     new_lc_buf_joined = b"".join(new_lc_bufs)
@@ -183,6 +186,7 @@ def map_load_commands_inplace(header, pointer_size, fn):
 def dylib_command_with_new_name(old_command, new_name):
     assert old_command.struct_type is DYLIB_COMMAND
     new_buf = old_command.buf[old_command.offset:old_command.end_offset]
+    new_buf = bytearray(new_buf)
     new_dc = DYLIB_COMMAND.view(new_buf, 0)
     # Almost certainly redundant, but just in case
     new_dc["dylib_name"] = len(new_buf)
@@ -728,7 +732,7 @@ def _pynativelib_mangle_import_libs(header, sizeof_pointer, libraries_to_mangle)
         if old_lc["cmd"] not in LOAD_DYLIB_COMMANDS:
             return old_lc
         library_ordinal = next(library_ordinal_count)
-        name, _ = read_asciiz(lc.buf, lc.offset + lc["dylib_name"])
+        name, _ = read_asciiz(old_lc.buf, old_lc.offset + old_lc["dylib_name"])
         basename = name.rsplit(b"/", 1)[-1]
         if basename not in libraries_to_mangle:
             return old_lc
@@ -868,7 +872,7 @@ def make_pynativelib_export_reexporter(
 
     new_buf = bytearray()
     new_buf += old_buf[:old_header.end_offset]
-    new_header = view_mach_header(new_buf)
+    new_header, _ = view_mach_header(new_buf)
 
     # load commands:
     # __TEXT segment with no sections, to cover the load header/load command
@@ -922,9 +926,9 @@ def make_pynativelib_export_reexporter(
     load_commands.append(__LINKEDIT)
 
     for orig_id_lc in view_load_commands(old_header, [LC_ID_DYLIB]):  # pragma: no branch
-        new_import_lc = dylib_command_with_new_name(orig_id_lc, new_import_id)
+        new_import_lc = dylib_command_with_new_name(orig_id_lc, imported_lib_id)
         new_import_lc["cmd"] = LC_LOAD_DYLIB
-        load_commands.append(new_import)
+        load_commands.append(new_import_lc)
         new_id_lc = dylib_command_with_new_name(orig_id_lc, new_lib_id)
         load_commands.append(new_id_lc)
 
@@ -957,8 +961,9 @@ def make_pynativelib_export_reexporter(
         assert lc.offset == 0
         pad_inplace(lc.buf, align=pointer_size)
         lc["cmdsize"] = len(lc.buf)
-        new_header["cmdsize"] += len(lc.buf)
+        new_header["sizeofcmds"] += len(lc.buf)
         new_buf += lc.buf
+    new_header["ncmds"] = len(load_commands)
 
     pad_inplace(new_buf, align=4096)
     for lc in view_load_commands(new_header, LC_SEGMENT_ANY):
@@ -992,8 +997,8 @@ def make_pynativelib_export_reexporter(
     # so we won't either.
     for lc in view_load_commands(new_header, LC_SEGMENT_ANY):
         if lc["segname"].strip(b"\x00") == b"__LINKEDIT":
-            lc["vmsize"] = lc["filesize"] = len(new_export_off)
+            lc["vmsize"] = lc["filesize"] = len(new_export_buf)
 
     _roundtrip_smoketest(new_buf)
 
-    return buf
+    return new_buf
