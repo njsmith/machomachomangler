@@ -37,6 +37,10 @@ to allow native libraries to be distributed as standalone `wheel files
   changes the library id while it's at it, e.g. from ``ssl.dylib`` ->
   ``pynativelib_openssl__ssl.dylib`` (like ``install_name_tool -id``)
 
+  Additionally: a tool that creates a "placeholder" library, which
+  imports the mangled library described above, and then re-exports the
+  symbols under their original names.
+
 * For code that wants to use a pynativelib library: a tool that
   takes a dylib/bundle/executable, a list of "original" dylibs, and
   for each "original" dylib, a newname for that dylib, and a
@@ -62,15 +66,14 @@ Some known limitations of the Mach-O mangling code:
 - We currently only rewrite the new-style DYLD_INFO symbol table
   (introduced in 10.5), not the (almost?) totally redundant DT_SYMTAB
   symbol table. (Interesting fact: all Mach-O binaries include two
-  completely different representations of their symbols tables. The new
-  one is more compact, so it saves space, but then they keep the old
+  completely different representations of their symbols tables. The
+  new one is more compact, to save space, but then they keep the old
   one around for compatibility, so... anyway.) As far as I can tell,
   the only thing in in modern MacOS that still uses DT_SYMTAB is
-  ``dladdr``, and I don't think anyone is relying on
-  ``dladdr`` output for, well... anything. I think worst case, you
-  might end up seeing the original symbol names inside a debugger or
-  profiler? But this wouldn't be *too* hard to fix if it becomes a
-  problem.
+  ``dladdr``, and I don't think anyone is relying on ``dladdr`` output
+  for, well... anything. I think worst case, you might end up seeing
+  the original symbol names inside a debugger or profiler? But this
+  wouldn't be *too* hard to fix if it becomes a problem.
 
 - It doesn't do any special handling of the DYLD_INFO weak_bind table,
   or weak exports. (NB these have nothing to do
