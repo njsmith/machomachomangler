@@ -65,16 +65,17 @@ Some known limitations of the Mach-O mangling code:
   binaries, then do your mangling first before signing.
 
 - We currently only rewrite the new-style DYLD_INFO symbol table
-  (introduced in 10.5), not the (almost?) totally redundant DT_SYMTAB
-  symbol table. (Interesting fact: all Mach-O binaries include two
-  completely different representations of their symbols tables. The
-  new one is more compact, to save space, but then they keep the old
-  one around for compatibility, so... anyway.) As far as I can tell,
-  the only thing in in modern MacOS that still uses DT_SYMTAB is
-  ``dladdr``, and I don't think anyone is relying on ``dladdr`` output
-  for, well... anything. I think worst case, you might end up seeing
-  the original symbol names inside a debugger or profiler? But this
-  wouldn't be *too* hard to fix if it becomes a problem.
+  (introduced in 10.5), not the (almost?) totally redundant
+  SYMTAB/DYSYMTAB symbol table. (Interesting fact: all Mach-O binaries
+  include two completely different representations of their symbols
+  tables. The new one is more compact, to save space, but then they
+  keep the old one around for compatibility, so... anyway.) As far as
+  I can tell, the only thing in in modern MacOS that still uses
+  SYMTAB/DYSYMTAB is ``dladdr``, and I don't think anyone is relying
+  on ``dladdr`` output for, well... anything? I think worst case, you
+  might end up seeing the original symbol names inside a debugger or
+  profiler? But this wouldn't be *too* hard to fix if it becomes a
+  problem.
 
 - It doesn't do any special handling of the DYLD_INFO weak_bind table,
   or weak exports. (NB these have nothing to do
