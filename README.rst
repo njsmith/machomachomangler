@@ -53,8 +53,9 @@ to allow native libraries to be distributed as standalone `wheel files
 It turns out that this *exact* combination of things is the only way
 provided for by the MacOS linker/loader to have dylib/bundle A linked
 against dylib B where the relative on-disk location of A and B is not
-known until after the executable starts. I promise it will all make
-sense once I have a chance to write it up properly...
+known until after the executable starts, while preserving the usual
+two-level namespace rules for avoiding symbol collisions. I promise it
+will all make sense once I have a chance to write it up properly...
 
 Some known limitations of the Mach-O mangling code:
 
