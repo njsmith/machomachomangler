@@ -145,6 +145,39 @@ def available_header_size(header):
     return smallest
 
 
+# fn receives:
+# - old load command
+# - new load command
+# - new load command buf
+# where the new load command buf is a mutable copy of the old load command,
+# and new load command is a view on this copy.
+# The fn should mutate the new buf in place (if it wants to).
+# This code worries about alignment and the cmdsize field, so you don't have
+# to.
+def map_load_commands_inplace(header, pointer_size, fn):
+    buf = header.buf
+    new_lc_bufs = []
+    for lc in view_load_commands(header):
+        new_lc_buf = bytearray(lc.buf[_sizeslice(lc.offset, lc["cmdsize"])])
+        new_lc = view_load_command(new_lc_buf, 0)
+        fn(lc, new_lc, new_lc_buf)
+        pad_inplace(new_lc_buf, align=pointer_size)
+        new_lc["cmdsize"] = len(new_lc_buf)
+        new_lc_bufs.append(new_lc_buf)
+    new_lc_buf_joined = b"".join(new_lc_bufs)
+    header_space = available_header_size(header)
+    lc_space = header_space - header.end_offset
+    if len(new_lc_buf_joined) > lc_space:
+        raise ValueError(
+            "Not enough space to rewrite Mach-O header: "
+            "need {}, but only {} available. Relink using -headerpad"
+            .format(len(new_header_buf), space_avail))
+    pad_inplace(new_lc_buf_joined, size=lc_space)
+    new_lc_slice = _sizeslice(header.end_offset, len(new_lc_buf_joined))
+    buf[new_lc_slice] = new_lc_buf_joined
+    header["sizeofcmds"] = len(new_lc_buf_joined)
+
+
 def replace_linkedit_chunk(buf, old_offset, old_size, new_chunk):
     # buf must be writeable; it's modified in place
     # returns: new_offset
@@ -644,38 +677,6 @@ def _roundtrip_smoketest(buf):
 # Pynativelib imports rewriter
 ################################################################
 
-# fn receives:
-# - old load command
-# - new load command
-# - new load command buf
-# where the new load command buf is a mutable copy of the old load command,
-# and new load command is a view on this copy.
-# The fn should mutate the new buf in place (if it wants to).
-# This code worries about alignment and the cmdsize field, so you don't have
-# to.
-def _map_load_commands_inplace(header, pointer_size, fn):
-    buf = header.buf
-    new_lc_bufs = []
-    for lc in view_load_commands(header):
-        new_lc_buf = bytearray(lc.buf[_sizeslice(lc.offset, lc["cmdsize"])])
-        new_lc = view_load_command(new_lc_buf, 0)
-        fn(lc, new_lc, new_lc_buf)
-        pad_inplace(new_lc_buf, align=pointer_size)
-        new_lc["cmdsize"] = len(new_lc_buf)
-        new_lc_bufs.append(new_lc_buf)
-    new_lc_buf_joined = b"".join(new_lc_bufs)
-    header_space = available_header_size(header)
-    lc_space = header_space - header.end_offset
-    if len(new_lc_buf_joined) > lc_space:
-        raise ValueError(
-            "Not enough space to rewrite Mach-O header: "
-            "need {}, but only {} available. Relink using -headerpad"
-            .format(len(new_header_buf), space_avail))
-    pad_inplace(new_lc_buf_joined, size=lc_space)
-    new_lc_slice = _sizeslice(header.end_offset, len(new_lc_buf_joined))
-    buf[new_lc_slice] = new_lc_buf_joined
-    header["sizeofcmds"] = len(new_lc_buf_joined)
-
 def _pynativelib_mangle_import_libs(header, sizeof_pointer, libraries_to_mangle):
     # buf must be a bytearray, which we modify in place
     # this rewrites the load command table, so if you have a load command view
@@ -705,7 +706,7 @@ def _pynativelib_mangle_import_libs(header, sizeof_pointer, libraries_to_mangle)
         new_lc["dylib_name"] = new_lc.size
         new_lc_buf[new_lc.size:] = new_name + b"\x00"
 
-    _map_load_commands_inplace(header, sizeof_pointer, mapper)
+    map_load_commands_inplace(header, sizeof_pointer, mapper)
 
     return ordinal_to_mangler
 
@@ -795,7 +796,7 @@ def rewrite_pynativelib_exports(buf, new_lib_id, symbol_mangler):
             return
         new_lc["dylib_name"] = new_lc.size
         new_lc_buf[new_lc.size:] = new_lib_id + b"\x00"
-    _map_load_commands_inplace(header, sizeof_pointer, mapper)
+    map_load_commands_inplace(header, sizeof_pointer, mapper)
 
     dyld_info = view_dyld_info(header)
     exports = list(decode_export_trie(buf, dyld_info["export_off"]))
