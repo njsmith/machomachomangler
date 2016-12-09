@@ -1,7 +1,7 @@
 import struct
 from io import BytesIO
-from collections import namedtuple
 import warnings
+import attr
 
 from .pe_info import (
     IMAGE_SCN_CNT_INITIALIZED_DATA,
@@ -15,6 +15,8 @@ from .pe_info import (
     SECTION_TABLE_ENTRY,
     IMPORT_DIRECTORY_TABLE,
     DELAY_LOAD_DIRECTORY_TABLE,
+    DATA_DIRECTORY_EXPORT_TABLE,
+    EXPORT_DIRECTORY_TABLE,
     )
 
 from .util import round_to_next, read_asciiz
@@ -52,7 +54,7 @@ from .util import round_to_next, read_asciiz
 #
 # Once the file has been loaded into memory, then the real fun starts: there
 # are a bunch of complicated pointer-filled structures defined inside that
-# data, including
+# data, including the import tables.
 #
 # Therefore, our basic plan is:
 # 1) Add our new string "BAR.DLL" to the end of the file.
@@ -115,11 +117,12 @@ def view_sections(coff_header, data_directories):
         coff_header.buf, data_directories[-1].end_offset,
         coff_header["NumberOfSections"])
 
-PEHeaders = namedtuple("PE_HEADERS",
-                       ["coff_header",
-                        "optional_header",
-                        "data_directories",
-                        "sections"])
+@attr.s(slots=True)
+class PEHeaders:
+    coff_header = attr.ib()
+    optional_header = attr.ib()
+    data_directories = attr.ib()
+    sections = attr.ib()
 
 def view_pe_headers(buf):
     coff_header = view_coff_header(buf)
@@ -194,6 +197,23 @@ def view_import_directory_tables(pe_headers):
     return _view_null_terminated_array(buf, offset,
                                        IMPORT_DIRECTORY_TABLE,
                                        "Import Lookup Table RVA")
+
+def view_export_directory_table(pe_headers):
+    buf = pe_headers.coff_header.buf
+    offset = _data_directory_offset(pe_headers, DATA_DIRECTORY_EXPORT_TABLE)
+    return EXPORT_DIRECTORY_TABLE.view(buf, offset)
+
+def export_names(pe_headers):
+    buf = pe_headers.coff_header.buf
+    edt = view_export_directory_table(pe_headers)
+    print(pe_headers.sections)
+    print(edt)
+    names = rva_to_file_offset(pe_headers.sections, edt["Name Pointer RVA"])
+    for i in range(edt["Number of Name Pointers"]):
+        (name_rva,) = struct.unpack_from("<I", buf, names + 4*i)
+        name_offset = rva_to_file_offset(pe_headers.sections, name_rva)
+        name, _ = read_asciiz(buf, name_offset)
+        yield name
 
 def view_delay_load_directory_tables(pe_headers):
     buf = pe_headers.coff_header.buf
@@ -317,8 +337,8 @@ def redll(buf, mapping):
         section_offset_mapping[old_dll] = data_offset
     data = data_writer.getbuffer()
 
-    # I check python27.dll, and its DLL name RVAs point into section .rdata
-    # which has characteristic:
+    # I checked python27.dll, and its DLL name RVAs point into section .rdata
+    # which has characteristics:
     #   0x40000040
     # = 0x40000000  IMAGE_SCN_MEM_READ
     # +         40  IMAGE_SCN_CNT_INITIALIZED_DATA

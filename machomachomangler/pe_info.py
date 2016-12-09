@@ -146,6 +146,22 @@ DELAY_LOAD_DIRECTORY_TABLE = StructType(
         (I4, "Time Stamp"),
     ])
 
+# page 74
+EXPORT_DIRECTORY_TABLE = StructType(
+    "EXPORT_DIRECTORY_TABLE", [
+        (I4, "Export Flags"),
+        (I4, "Time/Date Stamp"),
+        (I2, "Major Version"),
+        (I2, "Minor Version"),
+        (I4, "Name RVA"),  # name of this DLL
+        (I4, "Ordinal Base"),
+        (I4, "Address Table Entries"),
+        (I4, "Number of Name Pointers"),
+        (I4, "Export Address Table RVA"),
+        (I4, "Name Pointer RVA"),  # pointer to sequence of asciiz export names
+        (I4, "Ordinal Table RVA"),
+    ])
+
 # page 78
 IMPORT_DIRECTORY_TABLE = StructType(
     "IMPORT_DIRECTORY_TABLE", [
