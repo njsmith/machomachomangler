@@ -388,7 +388,7 @@ def decode_bind_table(buf, start, size, *, sizeof_pointer, lazy):
         elif opcode == BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
             b.library_ordinal = immediate
         elif opcode == BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
-            b.library_ordinal, p = read_uleb128_uleb(buf, p)
+            b.library_ordinal, p = read_uleb128(buf, p)
         elif opcode == BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
             # immediate is 4-bit signed negative number (really 0, -1, or -2)
             # 0 = 0x0, -1 = 0xf, -2 = 0xe
