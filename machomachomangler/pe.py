@@ -317,10 +317,8 @@ def add_section(orig_buf, data, characteristics):
         # Clear any certificates
         cert_table["VirtualAddress"] = 0
         cert_table["Size"] = 0
-        warnings.warn(UserWarning,
-                      "This file used to have an Authenticode signature. "
-                      "Now it doesn't. You might want to re-sign it.")
-
+        warnings.warn("This file used to have an Authenticode signature. "
+              "Now it doesn't. You might want to re-sign it.", UserWarning)
     return new_buf, new_section_rva
 
 def redll(buf, mapping):
@@ -368,8 +366,6 @@ def redll(buf, mapping):
     rewrite_names(view_delay_load_directory_tables, "Name")
 
     if unused_names:
-        warnings.warn(UserWarning,
-                      "Did not find any imports from following DLLs: "
-                      + ", ".join(str(name) for name in unused_names))
-
+        warnings.warn("Did not find any imports from following DLLs: "
+                    + ", ".join(str(name) for name in unused_names), UserWarning)
     return new_buf
